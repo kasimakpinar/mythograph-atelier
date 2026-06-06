@@ -509,7 +509,7 @@ wheels = [
 [[package]]
 name = "llama-cpp-python"
 version = "0.3.26"
-source = { registry = "https://abetlen.github.io/llama-cpp-python/whl/cpu" }
+source = { registry = "https://abetlen.github.io/llama-cpp-python/whl/cu124" }
 dependencies = [
     { name = "diskcache" },
     { name = "jinja2" },
@@ -517,13 +517,8 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26/llama_cpp_python-0.3.26-py3-none-linux_riscv64.whl" },
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26/llama_cpp_python-0.3.26-py3-none-macosx_11_0_arm64.whl" },
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26/llama_cpp_python-0.3.26-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl" },
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26/llama_cpp_python-0.3.26-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl" },
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26/llama_cpp_python-0.3.26-py3-none-musllinux_1_2_aarch64.whl" },
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26/llama_cpp_python-0.3.26-py3-none-musllinux_1_2_x86_64.whl" },
-    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26/llama_cpp_python-0.3.26-py3-none-win_amd64.whl" },
+    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26-cu124/llama_cpp_python-0.3.26-py3-none-linux_x86_64.whl" },
+    { url = "https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.26-cu124/llama_cpp_python-0.3.26-py3-none-win_amd64.whl" },
 ]
 
 [[package]]
@@ -639,7 +634,7 @@ dependencies = [
 requires-dist = [
     { name = "gradio", specifier = ">=5.0,<6.0" },
     { name = "huggingface-hub", specifier = ">=0.34.0" },
-    { name = "llama-cpp-python", specifier = ">=0.3.16", index = "https://abetlen.github.io/llama-cpp-python/whl/cpu" },
+    { name = "llama-cpp-python", specifier = ">=0.3.16", index = "https://abetlen.github.io/llama-cpp-python/whl/cu124" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pydantic", specifier = ">=2.7" },
