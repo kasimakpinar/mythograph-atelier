@@ -1,7 +1,12 @@
 import json
+import os
+import site
+import sys
+import ctypes
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from mythograph.config import (
@@ -95,6 +100,7 @@ class LlamaCppClient:
             return cls._llm
 
         try:
+            _preload_cuda_libraries()
             from llama_cpp import Llama
         except ImportError as exc:
             raise RuntimeError(
@@ -131,6 +137,51 @@ def runtime_status() -> dict[str, Any]:
             }
         )
     return status
+
+
+def _preload_cuda_libraries() -> None:
+    if not sys.platform.startswith("linux"):
+        return
+
+    library_dirs = _cuda_library_dirs()
+    if not library_dirs:
+        return
+
+    existing = os.environ.get("LD_LIBRARY_PATH", "")
+    additions = [str(path) for path in library_dirs if str(path) not in existing.split(":")]
+    if additions:
+        os.environ["LD_LIBRARY_PATH"] = ":".join(additions + ([existing] if existing else []))
+
+    for library_name in (
+        "libcudart.so.12",
+        "libcublasLt.so.12",
+        "libcublas.so.12",
+    ):
+        for directory in library_dirs:
+            library_path = directory / library_name
+            if library_path.exists():
+                try:
+                    ctypes.CDLL(str(library_path), mode=ctypes.RTLD_GLOBAL)
+                except OSError:
+                    pass
+                break
+
+
+def _cuda_library_dirs() -> list[Path]:
+    roots = [Path(path) for path in site.getsitepackages()]
+    user_site = site.getusersitepackages()
+    if user_site:
+        roots.append(Path(user_site))
+
+    library_dirs: list[Path] = []
+    for root in roots:
+        nvidia_root = root / "nvidia"
+        if not nvidia_root.exists():
+            continue
+        for path in nvidia_root.glob("*/lib"):
+            if path.is_dir():
+                library_dirs.append(path)
+    return library_dirs
 
 
 def extract_json_object(text: str) -> dict[str, Any]:

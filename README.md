@@ -48,13 +48,13 @@ python app.py
 
 ## Image Generation
 
-The image layer is now routed through an `ImageClient`, but the active public Space backend is still the local Pillow renderer:
+The image layer is routed through an `ImageClient`. The current public Space test backend is FLUX.2-klein, with Pillow kept as a reliable fallback:
 
 ```bash
-MYTHOGRAPH_IMAGE_MODE=pillow
+MYTHOGRAPH_IMAGE_MODE=flux
 ```
 
-Trace exports include an `image_generation` event with `source`, `elapsed_seconds`, `error`, and `image_path`. Today the expected source is `pillow_fallback`. A future FLUX or other small image model can be added behind the same interface without changing the UI flow.
+Trace exports include an `image_generation` event with `source`, `elapsed_seconds`, `error`, and `image_path`. For the FLUX path, the expected source is `flux_klein`; if model loading or generation fails, the app falls back to Pillow and records the error.
 
 Optional FLUX.2-klein image backend:
 
@@ -69,7 +69,7 @@ MYTHOGRAPH_IMAGE_GUIDANCE_SCALE=1.0
 MYTHOGRAPH_IMAGE_CPU_OFFLOAD=1
 ```
 
-HF Spaces only installs `requirements.txt` automatically. When we are ready to test FLUX, Codex should temporarily move the dependencies from `requirements-image.txt` into `requirements.txt`, commit, and push. Use it only when testing this backend on suitable GPU hardware. If FLUX fails to load or generate, the app falls back to Pillow and records the error in the `image_generation` trace event.
+HF Spaces only installs `requirements.txt` automatically, so the active Space requirements include both the FLUX dependencies and the llama.cpp proof dependencies. If FLUX fails to load or generate, the app falls back to Pillow and records the error in the `image_generation` trace event.
 
 FLUX.2-klein does not currently use a `negative_prompt` argument in this app path. The prompt itself still asks for no text, letters, signatures, or watermarks. The default image dtype is `float16`; set `MYTHOGRAPH_IMAGE_DTYPE=bfloat16` only if the selected hardware/runtime supports it cleanly. The backend uses `Flux2KleinPipeline` with CPU offload by default to reduce VRAM pressure.
 
@@ -137,7 +137,7 @@ MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
 
 Install the optional runtime dependencies from `requirements-llamacpp.txt` only when enabling this mode.
 
-For the public Space proof run, `requirements.txt` already includes the CUDA prebuilt `llama-cpp-python` wheel index. This lets the Space import llama.cpp with GPU support without downloading a model until the runtime mode is changed.
+For the public Space proof run, `requirements.txt` already includes the CUDA prebuilt `llama-cpp-python` wheel index and CUDA runtime packages. The app also preloads CUDA libraries from pip's `site-packages/nvidia/...` folders before importing `llama_cpp`, because some Space images do not expose those libraries on the dynamic loader path by default.
 
 HF Space proof steps:
 
