@@ -101,6 +101,26 @@ MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
 
 Install the optional runtime dependencies from `requirements-llamacpp.txt` only when enabling this mode.
 
+For the public Space proof run, `requirements.txt` already includes the CPU prebuilt `llama-cpp-python` wheel index. This lets the Space import llama.cpp without downloading a model until the runtime mode is changed.
+
+HF Space proof steps:
+
+1. Let the Space rebuild after this commit.
+2. Keep hardware on CPU/ZeroGPU for the tiny proof.
+3. Add Space variables:
+
+```text
+MYTHOGRAPH_LLM_MODE=llamacpp
+MYTHOGRAPH_LLAMACPP_REPO_ID=lmstudio-community/Qwen3.5-0.8B-GGUF
+MYTHOGRAPH_LLAMACPP_FILENAME=Qwen3.5-0.8B-Q4_K_M.gguf
+MYTHOGRAPH_LLAMACPP_N_CTX=2048
+MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
+```
+
+4. Restart the Space.
+5. Confirm the UI shows `Runtime: llamacpp`.
+6. Generate once and download the trace. The trace should include `source: llamacpp`.
+
 Cost guardrails:
 
 - Keep CPU/ZeroGPU mock mode active while polishing the UI.

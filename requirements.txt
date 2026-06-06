@@ -3,3 +3,9 @@ pillow>=10.0
 pydantic>=2.7
 numpy>=1.26
 spaces>=0.40.0
+
+# llama.cpp proof path. This installs the Python runtime but does not download
+# or load a GGUF model unless MYTHOGRAPH_LLM_MODE=llamacpp is set.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+llama-cpp-python>=0.3.16
+huggingface-hub>=0.34.0

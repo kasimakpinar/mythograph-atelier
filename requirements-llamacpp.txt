@@ -1,8 +1,8 @@
-# Optional llama.cpp runtime dependencies.
+# Optional llama.cpp runtime dependencies reference.
 #
-# Keep these out of the default requirements until the Space is intentionally
-# switched from mock mode to llama.cpp mode. Building or downloading this stack
-# can be slow, so test first with a tiny GGUF before enabling a 32B model.
+# The Space proof path now includes these in requirements.txt using the CPU
+# wheel index so HF can import llama_cpp when MYTHOGRAPH_LLM_MODE=llamacpp.
+# Keep this file as the badge/runbook reference for alternate CUDA wheels.
 #
 # For CUDA wheels, choose the wheel index that matches the Space image.
 # Example:
