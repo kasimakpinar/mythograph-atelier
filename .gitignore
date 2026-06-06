@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+outputs/
+data/traces.jsonl
+server.log
+server.err
+
+.env
+.env.*
