@@ -137,7 +137,7 @@ MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
 
 Install the optional runtime dependencies from `requirements-llamacpp.txt` only when enabling this mode.
 
-For the public Space proof run, `requirements.txt` already includes the CPU prebuilt `llama-cpp-python` wheel index. This lets the Space import llama.cpp without downloading a model until the runtime mode is changed.
+For the public Space proof run, `requirements.txt` already includes the CUDA prebuilt `llama-cpp-python` wheel index. This lets the Space import llama.cpp with GPU support without downloading a model until the runtime mode is changed.
 
 HF Space proof steps:
 

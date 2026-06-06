@@ -4,8 +4,7 @@
 # wheel index so HF can import llama_cpp when MYTHOGRAPH_LLM_MODE=llamacpp.
 # Keep this file as the badge/runbook reference for alternate CUDA wheels.
 #
-# For CUDA wheels, choose the wheel index that matches the Space image.
-# Example:
-# --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+# CUDA wheel for GPU llama.cpp testing on Hugging Face Spaces.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 llama-cpp-python>=0.3.16
 huggingface-hub>=0.34.0

@@ -22,5 +22,5 @@ package = false
 
 [[tool.uv.index]]
 name = "llama-cpp-cpu"
-url = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+url = "https://abetlen.github.io/llama-cpp-python/whl/cu124"
 explicit = true
