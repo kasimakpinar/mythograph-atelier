@@ -1,3 +1,5 @@
+import time
+
 from mythograph.schemas.art_recipe import ArtRecipe, Symbol
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.config import ROOT_DIR
@@ -94,6 +96,7 @@ def build_art_recipe_with_model(
     fallback = build_art_recipe(profile, regeneration_instruction)
     llm = client or LLMClient()
     system_prompt = (ROOT_DIR / "mythograph" / "prompts" / "art_recipe_system.txt").read_text(encoding="utf-8")
+    started = time.perf_counter()
     response = llm.complete_json(
         system_prompt,
         {
@@ -102,9 +105,18 @@ def build_art_recipe_with_model(
             "fallback_recipe": fallback.model_dump(),
         },
     )
+    elapsed_seconds = round(time.perf_counter() - started, 3)
 
     if response.source == "mock":
-        log_event("llm_art_recipe", {"source": "mock", "used_fallback": True, "recipe": fallback.model_dump()})
+        log_event(
+            "llm_art_recipe",
+            {
+                "source": "mock",
+                "elapsed_seconds": elapsed_seconds,
+                "used_fallback": True,
+                "recipe": fallback.model_dump(),
+            },
+        )
         return fallback
 
     try:
@@ -114,6 +126,7 @@ def build_art_recipe_with_model(
             "llm_art_recipe",
             {
                 "source": response.source,
+                "elapsed_seconds": elapsed_seconds,
                 "error": str(exc),
                 "raw_content": response.content,
                 "used_fallback": True,
@@ -126,6 +139,7 @@ def build_art_recipe_with_model(
         "llm_art_recipe",
         {
             "source": response.source,
+            "elapsed_seconds": elapsed_seconds,
             "raw_content": response.content,
             "used_fallback": False,
             "recipe": recipe.model_dump(),

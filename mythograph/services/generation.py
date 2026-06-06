@@ -1,6 +1,7 @@
 import math
 import random
-from pathlib import Path
+import time
+from dataclasses import dataclass
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -8,7 +9,16 @@ from mythograph.config import OUTPUT_DIR
 from mythograph.schemas.art_recipe import ArtRecipe
 
 
-def generate_fallback_image(recipe: ArtRecipe, seed: int | None = None, size: int = 1024) -> str:
+@dataclass
+class ImageGenerationResult:
+    path: str
+    source: str
+    elapsed_seconds: float
+    error: str | None = None
+
+
+def generate_fallback_image(recipe: ArtRecipe, seed: int | None = None, size: int = 1024) -> ImageGenerationResult:
+    started = time.perf_counter()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     seed_value = seed if seed is not None else abs(hash(recipe.image_prompt)) % 10_000_000
     rng = random.Random(seed_value)
@@ -26,7 +36,11 @@ def generate_fallback_image(recipe: ArtRecipe, seed: int | None = None, size: in
 
     path = OUTPUT_DIR / f"mythograph_{seed_value}.png"
     img.save(path)
-    return str(path)
+    return ImageGenerationResult(
+        path=str(path),
+        source="pillow_fallback",
+        elapsed_seconds=round(time.perf_counter() - started, 3),
+    )
 
 
 def _paint_background(draw: ImageDraw.ImageDraw, palette: list[str], size: int, rng: random.Random) -> None:

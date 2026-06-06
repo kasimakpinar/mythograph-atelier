@@ -20,3 +20,5 @@ LLAMACPP_N_CTX = int(os.getenv("MYTHOGRAPH_LLAMACPP_N_CTX", "2048"))
 LLAMACPP_N_GPU_LAYERS = int(os.getenv("MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS", "-1"))
 LLAMACPP_CHAT_FORMAT = os.getenv("MYTHOGRAPH_LLAMACPP_CHAT_FORMAT", "").strip() or None
 LLAMACPP_VERBOSE = os.getenv("MYTHOGRAPH_LLAMACPP_VERBOSE", "0").strip() == "1"
+
+IMAGE_MODE = os.getenv("MYTHOGRAPH_IMAGE_MODE", "pillow").strip().lower()

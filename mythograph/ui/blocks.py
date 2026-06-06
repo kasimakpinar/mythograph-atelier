@@ -2,11 +2,11 @@ import gradio as gr
 import spaces
 
 from mythograph.config import APP_TITLE, MODEL_UI_DIRECTOR_ENABLED, ROOT_DIR
+from mythograph.models.image_client import ImageClient
 from mythograph.models.llm_client import runtime_status
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import UIAction
 from mythograph.services.art_recipe import build_art_recipe_with_model
-from mythograph.services.generation import generate_fallback_image
 from mythograph.services.interview import (
     apply_answer,
     choose_next_ui,
@@ -338,9 +338,22 @@ def _generate(data: dict, recipe_data: dict | None):
         "Rendering fallback painting now.",
         recipe.model_dump(),
     )
-    path = generate_fallback_image(recipe)
-    log_event("generate", {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": path})
-    yield _gallery_outputs(path, recipe, "Generation complete.\nDownload the trace to confirm model source and fallback status.")
+    image_result = ImageClient().generate(recipe)
+    log_event(
+        "image_generation",
+        {
+            "source": image_result.source,
+            "elapsed_seconds": image_result.elapsed_seconds,
+            "error": image_result.error,
+            "image_path": image_result.path,
+        },
+    )
+    log_event("generate", {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": image_result.path})
+    yield _gallery_outputs(
+        image_result.path,
+        recipe,
+        f"Generation complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
+    )
 
 
 @spaces.GPU(duration=180)
@@ -359,12 +372,30 @@ def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
         "Rendering fallback painting now.",
         recipe.model_dump(),
     )
-    path = generate_fallback_image(recipe)
+    image_result = ImageClient().generate(recipe)
+    log_event(
+        "image_generation",
+        {
+            "source": image_result.source,
+            "elapsed_seconds": image_result.elapsed_seconds,
+            "error": image_result.error,
+            "image_path": image_result.path,
+        },
+    )
     log_event(
         "regenerate",
-        {"profile": profile.model_dump(), "instruction": instruction, "recipe": recipe.model_dump(), "image_path": path},
+        {
+            "profile": profile.model_dump(),
+            "instruction": instruction,
+            "recipe": recipe.model_dump(),
+            "image_path": image_result.path,
+        },
     )
-    yield _gallery_outputs(path, recipe, "Regeneration complete.\nDownload the trace to confirm model source and fallback status.")
+    yield _gallery_outputs(
+        image_result.path,
+        recipe,
+        f"Regeneration complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
+    )
 
 
 def _pending_outputs(activity: str, recipe_data: dict | None):

@@ -46,6 +46,16 @@ python app.py
 - Image generation: FLUX.2-klein or another hackathon-eligible small image model.
 - Fine-tuned art director: optional LoRA/SFT model for structured art recipes.
 
+## Image Generation
+
+The image layer is now routed through an `ImageClient`, but the active public Space backend is still the local Pillow renderer:
+
+```bash
+MYTHOGRAPH_IMAGE_MODE=pillow
+```
+
+Trace exports include an `image_generation` event with `source`, `elapsed_seconds`, `error`, and `image_path`. Today the expected source is `pillow_fallback`. A future FLUX or other small image model can be added behind the same interface without changing the UI flow.
+
 ## Local LLM Configuration
 
 The app defaults to safe mock mode so the Space remains usable even when no model server is running.
