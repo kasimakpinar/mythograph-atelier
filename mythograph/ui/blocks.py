@@ -2,6 +2,7 @@ import gradio as gr
 import spaces
 
 from mythograph.config import APP_TITLE, ROOT_DIR
+from mythograph.models.llm_client import runtime_status
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import UIAction
 from mythograph.services.art_recipe import build_art_recipe_with_model
@@ -40,6 +41,7 @@ def build_demo() -> gr.Blocks:
                     "Choose a starting idea, write your own, or ask the atelier to surprise you.",
                     elem_classes=["ma-note"],
                 )
+                gr.Markdown(_format_runtime_status(), elem_classes=["ma-note"])
                 custom_idea = gr.Textbox(
                     label="Start with your own idea",
                     placeholder="I want something about discipline and hope.",
@@ -207,6 +209,18 @@ def build_demo() -> gr.Blocks:
 
 def _flow_outputs(*components):
     return list(components)
+
+
+def _format_runtime_status() -> str:
+    status = runtime_status()
+    mode = status["mode"]
+    if mode == "llamacpp":
+        model = f'{status["llamacpp_repo_id"]} / {status["llamacpp_filename"]}'
+    elif mode == "local":
+        model = f'{status["openai_compatible_model"]} at {status["openai_compatible_base_url"]}'
+    else:
+        model = "deterministic fallback"
+    return f"Runtime: `{mode}` | Text model: `{model}`"
 
 
 def _profile(data: dict) -> InterviewProfile:

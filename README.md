@@ -75,6 +75,31 @@ MYTHOGRAPH_LLM_MODEL=nvidia/OpenReasoning-Nemotron-32B
 
 The current public Space intentionally defaults to mock mode until a model server is added to the Space runtime or attached as a local OpenAI-compatible service.
 
+## llama.cpp Badge Path
+
+The app also supports an optional in-process llama.cpp runtime through `llama-cpp-python`.
+
+Keep the public Space in mock mode until you are ready to spend credits. For the badge path, first test with a tiny GGUF, then switch to Nemotron:
+
+```bash
+MYTHOGRAPH_LLM_MODE=llamacpp
+MYTHOGRAPH_LLAMACPP_REPO_ID=Triangle104/OpenReasoning-Nemotron-32B-Q4_K_M-GGUF
+MYTHOGRAPH_LLAMACPP_FILENAME=*q4_k_m.gguf
+MYTHOGRAPH_LLAMACPP_N_CTX=4096
+MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
+```
+
+Install the optional runtime dependencies from `requirements-llamacpp.txt` only when enabling this mode.
+
+Cost guardrails:
+
+- Keep CPU/ZeroGPU mock mode active while polishing the UI.
+- Use a tiny GGUF for the first llama.cpp proof.
+- Switch paid hardware on only for recorded testing and the final demo window.
+- Stop or downgrade paid hardware immediately after recording.
+
+As of the current Hugging Face docs, ZeroGPU over-quota usage is billed at $1 per 10 GPU minutes, while paid Spaces hardware is hourly. A single L40S is listed at $1.80/hour and a single A100 at $2.50/hour, so the $20 credit budget is workable if we keep paid runtime windows short.
+
 ## Development With Codex
 
 This project was developed with OpenAI Codex as a local coding collaborator. The submitted app is designed not to call OpenAI APIs at runtime.

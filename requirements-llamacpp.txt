@@ -1,0 +1,11 @@
+# Optional llama.cpp runtime dependencies.
+#
+# Keep these out of the default requirements until the Space is intentionally
+# switched from mock mode to llama.cpp mode. Building or downloading this stack
+# can be slow, so test first with a tiny GGUF before enabling a 32B model.
+#
+# For CUDA wheels, choose the wheel index that matches the Space image.
+# Example:
+# --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+llama-cpp-python>=0.3.16
+huggingface-hub>=0.34.0
