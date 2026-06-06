@@ -335,7 +335,7 @@ def _generate(data: dict, recipe_data: dict | None):
     yield _pending_outputs(
         "Art recipe ready.\n"
         f"Title: {recipe.title}\n"
-        "Rendering fallback painting now.",
+        "Rendering painting now.",
         recipe.model_dump(),
     )
     image_result = ImageClient().generate(recipe)
@@ -369,7 +369,7 @@ def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
     yield _pending_outputs(
         "Updated recipe ready.\n"
         f"Title: {recipe.title}\n"
-        "Rendering fallback painting now.",
+        "Rendering painting now.",
         recipe.model_dump(),
     )
     image_result = ImageClient().generate(recipe)

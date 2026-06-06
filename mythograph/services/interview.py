@@ -1,3 +1,5 @@
+import time
+
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import NextUI, UIAction
 from mythograph.config import ROOT_DIR
@@ -116,6 +118,7 @@ def choose_next_ui_with_model(profile: InterviewProfile, client: LLMClient | Non
     fallback = choose_next_ui(profile)
     llm = client or LLMClient()
     system_prompt = (ROOT_DIR / "mythograph" / "prompts" / "interviewer_system.txt").read_text(encoding="utf-8")
+    started = time.perf_counter()
     response = llm.complete_json(
         system_prompt,
         {
@@ -125,9 +128,33 @@ def choose_next_ui_with_model(profile: InterviewProfile, client: LLMClient | Non
             "allowed_actions": [action.value for action in UIAction],
         },
     )
+    elapsed_seconds = round(time.perf_counter() - started, 3)
 
     if response.source == "mock":
-        log_event("llm_ui_director", {"source": "mock", "used_fallback": True, "next_ui": fallback.model_dump()})
+        log_event(
+            "llm_ui_director",
+            {
+                "source": "mock",
+                "elapsed_seconds": elapsed_seconds,
+                "used_fallback": True,
+                "next_ui": fallback.model_dump(),
+            },
+        )
+        return fallback
+
+    if response.error:
+        log_event(
+            "llm_ui_director",
+            {
+                "source": response.source,
+                "elapsed_seconds": elapsed_seconds,
+                "error": response.error,
+                "transport_error": response.error,
+                "raw_content": response.content,
+                "used_fallback": True,
+                "next_ui": fallback.model_dump(),
+            },
+        )
         return fallback
 
     try:
@@ -137,7 +164,9 @@ def choose_next_ui_with_model(profile: InterviewProfile, client: LLMClient | Non
             "llm_ui_director",
             {
                 "source": response.source,
+                "elapsed_seconds": elapsed_seconds,
                 "error": str(exc),
+                "transport_error": response.error,
                 "raw_content": response.content,
                 "used_fallback": True,
                 "next_ui": fallback.model_dump(),
@@ -150,6 +179,8 @@ def choose_next_ui_with_model(profile: InterviewProfile, client: LLMClient | Non
         "llm_ui_director",
         {
             "source": response.source,
+            "elapsed_seconds": elapsed_seconds,
+            "transport_error": response.error,
             "raw_content": response.content,
             "used_fallback": False,
             "next_ui": candidate.model_dump(),

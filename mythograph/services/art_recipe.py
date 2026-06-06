@@ -119,6 +119,21 @@ def build_art_recipe_with_model(
         )
         return fallback
 
+    if response.error:
+        log_event(
+            "llm_art_recipe",
+            {
+                "source": response.source,
+                "elapsed_seconds": elapsed_seconds,
+                "error": response.error,
+                "transport_error": response.error,
+                "raw_content": response.content,
+                "used_fallback": True,
+                "recipe": fallback.model_dump(),
+            },
+        )
+        return fallback
+
     try:
         recipe = ArtRecipe.model_validate(extract_json_object(response.content))
     except Exception as exc:
@@ -128,6 +143,7 @@ def build_art_recipe_with_model(
                 "source": response.source,
                 "elapsed_seconds": elapsed_seconds,
                 "error": str(exc),
+                "transport_error": response.error,
                 "raw_content": response.content,
                 "used_fallback": True,
                 "recipe": fallback.model_dump(),
@@ -140,6 +156,7 @@ def build_art_recipe_with_model(
         {
             "source": response.source,
             "elapsed_seconds": elapsed_seconds,
+            "transport_error": response.error,
             "raw_content": response.content,
             "used_fallback": False,
             "recipe": recipe.model_dump(),
