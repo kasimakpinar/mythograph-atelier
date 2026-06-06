@@ -1,7 +1,7 @@
 import time
 
 from mythograph.config import IMAGE_MODE
-from mythograph.config import IMAGE_HEIGHT, IMAGE_MODEL_ID, IMAGE_SEED, IMAGE_STEPS, IMAGE_WIDTH
+from mythograph.config import IMAGE_DTYPE, IMAGE_HEIGHT, IMAGE_MODEL_ID, IMAGE_SEED, IMAGE_STEPS, IMAGE_WIDTH
 from mythograph.config import OUTPUT_DIR
 from mythograph.schemas.art_recipe import ArtRecipe
 from mythograph.services.generation import ImageGenerationResult, generate_fallback_image
@@ -69,7 +69,7 @@ class ImageClient:
 
         cls._flux_pipe = DiffusionPipeline.from_pretrained(
             IMAGE_MODEL_ID,
-            dtype=torch.bfloat16,
+            dtype=_torch_dtype(torch),
             device_map="cuda",
         )
         return cls._flux_pipe
@@ -82,3 +82,11 @@ class ImageClient:
             if "negative_prompt" not in str(exc):
                 raise
             return pipe(**image_kwargs)
+
+
+def _torch_dtype(torch):
+    if IMAGE_DTYPE in {"bf16", "bfloat16"}:
+        return torch.bfloat16
+    if IMAGE_DTYPE in {"fp32", "float32"}:
+        return torch.float32
+    return torch.float16

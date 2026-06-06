@@ -64,11 +64,12 @@ MYTHOGRAPH_IMAGE_MODEL_ID=black-forest-labs/FLUX.2-klein-4B
 MYTHOGRAPH_IMAGE_WIDTH=1024
 MYTHOGRAPH_IMAGE_HEIGHT=1024
 MYTHOGRAPH_IMAGE_STEPS=8
+MYTHOGRAPH_IMAGE_DTYPE=float16
 ```
 
 HF Spaces only installs `requirements.txt` automatically. When we are ready to test FLUX, Codex should temporarily move the dependencies from `requirements-image.txt` into `requirements.txt`, commit, and push. Use it only when testing this backend on suitable GPU hardware. If FLUX fails to load or generate, the app falls back to Pillow and records the error in the `image_generation` trace event.
 
-FLUX.2-klein does not currently use a `negative_prompt` argument in this app path. The prompt itself still asks for no text, letters, signatures, or watermarks.
+FLUX.2-klein does not currently use a `negative_prompt` argument in this app path. The prompt itself still asks for no text, letters, signatures, or watermarks. The default image dtype is `float16`; set `MYTHOGRAPH_IMAGE_DTYPE=bfloat16` only if the selected hardware/runtime supports it cleanly.
 
 ## Local LLM Configuration
 
