@@ -83,6 +83,16 @@ Keep the public Space in mock mode until you are ready to spend credits. For the
 
 ```bash
 MYTHOGRAPH_LLM_MODE=llamacpp
+MYTHOGRAPH_LLAMACPP_REPO_ID=lmstudio-community/Qwen3.5-0.8B-GGUF
+MYTHOGRAPH_LLAMACPP_FILENAME=Qwen3.5-0.8B-Q4_K_M.gguf
+MYTHOGRAPH_LLAMACPP_N_CTX=2048
+MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
+```
+
+Nemotron demo settings:
+
+```bash
+MYTHOGRAPH_LLM_MODE=llamacpp
 MYTHOGRAPH_LLAMACPP_REPO_ID=Triangle104/OpenReasoning-Nemotron-32B-Q4_K_M-GGUF
 MYTHOGRAPH_LLAMACPP_FILENAME=*q4_k_m.gguf
 MYTHOGRAPH_LLAMACPP_N_CTX=4096
