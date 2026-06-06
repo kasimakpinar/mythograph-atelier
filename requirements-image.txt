@@ -1,7 +1,8 @@
 # Optional image-model runtime dependencies.
 #
-# Keep this separate from requirements.txt until the Space is intentionally
-# switched from the Pillow fallback to a real image model backend.
+# These are currently mirrored into requirements.txt for the active FLUX test.
+# Remove them from requirements.txt again after the test if rebuild/startup cost
+# becomes a problem.
 diffusers>=0.36.0
 torch>=2.9.0
 accelerate>=1.12.0

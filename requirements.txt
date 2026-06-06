@@ -9,3 +9,10 @@ spaces>=0.40.0
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 llama-cpp-python>=0.3.16
 huggingface-hub>=0.34.0
+
+# Image-model test path. These enable MYTHOGRAPH_IMAGE_MODE=flux.
+diffusers>=0.36.0
+torch>=2.9.0
+accelerate>=1.12.0
+transformers>=4.57.0
+safetensors>=0.7.0
