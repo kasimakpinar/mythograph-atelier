@@ -56,6 +56,18 @@ MYTHOGRAPH_IMAGE_MODE=pillow
 
 Trace exports include an `image_generation` event with `source`, `elapsed_seconds`, `error`, and `image_path`. Today the expected source is `pillow_fallback`. A future FLUX or other small image model can be added behind the same interface without changing the UI flow.
 
+Optional FLUX.2-klein image backend:
+
+```bash
+MYTHOGRAPH_IMAGE_MODE=flux
+MYTHOGRAPH_IMAGE_MODEL_ID=black-forest-labs/FLUX.2-klein-4B
+MYTHOGRAPH_IMAGE_WIDTH=1024
+MYTHOGRAPH_IMAGE_HEIGHT=1024
+MYTHOGRAPH_IMAGE_STEPS=8
+```
+
+Install `requirements-image.txt` only when testing this backend on suitable GPU hardware. If FLUX fails to load or generate, the app falls back to Pillow and records the error in the `image_generation` trace event.
+
 ## Local LLM Configuration
 
 The app defaults to safe mock mode so the Space remains usable even when no model server is running.

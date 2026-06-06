@@ -22,3 +22,8 @@ LLAMACPP_CHAT_FORMAT = os.getenv("MYTHOGRAPH_LLAMACPP_CHAT_FORMAT", "").strip() 
 LLAMACPP_VERBOSE = os.getenv("MYTHOGRAPH_LLAMACPP_VERBOSE", "0").strip() == "1"
 
 IMAGE_MODE = os.getenv("MYTHOGRAPH_IMAGE_MODE", "pillow").strip().lower()
+IMAGE_MODEL_ID = os.getenv("MYTHOGRAPH_IMAGE_MODEL_ID", "black-forest-labs/FLUX.2-klein-4B")
+IMAGE_WIDTH = int(os.getenv("MYTHOGRAPH_IMAGE_WIDTH", "1024"))
+IMAGE_HEIGHT = int(os.getenv("MYTHOGRAPH_IMAGE_HEIGHT", "1024"))
+IMAGE_STEPS = int(os.getenv("MYTHOGRAPH_IMAGE_STEPS", "8"))
+IMAGE_SEED = int(os.getenv("MYTHOGRAPH_IMAGE_SEED", "0"))
