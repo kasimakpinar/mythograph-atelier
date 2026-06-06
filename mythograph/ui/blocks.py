@@ -273,14 +273,16 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
     clean = (text or "").strip()
     if not clean:
         return _reset()
-    profile, turn = advance_conversation(_profile(profile_data), user_message=clean)
-    chat = (history or []) + [_message("user", clean), _message("assistant", turn.assistant_message)]
+    director_history = (history or []) + [_message("user", clean)]
+    profile, turn = advance_conversation(_profile(profile_data), user_message=clean, chat_history=director_history)
+    chat = director_history + [_message("assistant", turn.assistant_message)]
     return _render(profile, chat, turn)
 
 
 def _submit_starter(profile_data: dict, history: list[dict], text: str):
-    profile, turn = advance_conversation(_profile(profile_data), user_message=text)
-    chat = (history or []) + [_message("user", text), _message("assistant", turn.assistant_message)]
+    director_history = (history or []) + [_message("user", text)]
+    profile, turn = advance_conversation(_profile(profile_data), user_message=text, chat_history=director_history)
+    chat = director_history + [_message("assistant", turn.assistant_message)]
     return _render(profile, chat, turn)
 
 
@@ -318,8 +320,9 @@ def _submit_swatch(profile_data: dict, history: list[dict], value: str | None):
 
 
 def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):
-    profile, turn = advance_conversation(_profile(profile_data), control_response=response)
-    chat = (history or []) + [_message("user", user_summary), _message("assistant", turn.assistant_message)]
+    director_history = (history or []) + [_message("user", user_summary)]
+    profile, turn = advance_conversation(_profile(profile_data), control_response=response, chat_history=director_history)
+    chat = director_history + [_message("assistant", turn.assistant_message)]
     return _render(profile, chat, turn)
 
 

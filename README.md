@@ -99,7 +99,28 @@ By default, the dynamic interview uses the deterministic fast path even when mod
 MYTHOGRAPH_MODEL_UI_DIRECTOR=0
 ```
 
-Set `MYTHOGRAPH_MODEL_UI_DIRECTOR=1` only when testing a fast enough text model for every interview turn.
+Set `MYTHOGRAPH_MODEL_UI_DIRECTOR=1` only when testing the legacy interviewer path. The chat-first UI uses `MYTHOGRAPH_CONVERSATION_MODE` instead.
+
+Hosted OpenAI-compatible text endpoints, including Modal vLLM and Hugging Face Inference Providers, use:
+
+```bash
+MYTHOGRAPH_LLM_MODE=local
+MYTHOGRAPH_LLM_BASE_URL=https://your-endpoint.example/v1
+MYTHOGRAPH_LLM_MODEL=nemotron-nano-9b-v2
+MYTHOGRAPH_LLM_API_KEY=your-api-key
+MYTHOGRAPH_LLM_SOURCE_LABEL=modal
+MYTHOGRAPH_LLM_TIMEOUT_SECONDS=120
+MYTHOGRAPH_LLM_MAX_TOKENS=1200
+MYTHOGRAPH_LLM_TEMPERATURE=0.7
+```
+
+For model-authored interview turns:
+
+```bash
+MYTHOGRAPH_CONVERSATION_MODE=model_assisted
+```
+
+If the hosted model fails, returns invalid JSON, or tries to show an unsafe UI control, the app falls back to the deterministic conversation turn and records `llm_conversation_turn` in the trace.
 
 Target model for the text/art director layer:
 
@@ -110,6 +131,62 @@ MYTHOGRAPH_LLM_MODEL=nvidia/OpenReasoning-Nemotron-32B
 ```
 
 The current public Space intentionally defaults to mock mode until a model server is added to the Space runtime or attached as a local OpenAI-compatible service.
+
+## Modal Nemotron Endpoint
+
+This repo includes `modal_vllm_nemotron.py`, which deploys NVIDIA Nemotron Nano 9B v2 behind a vLLM OpenAI-compatible server.
+
+User setup:
+
+```bash
+pip install modal
+modal setup
+modal secret create mythograph-vllm VLLM_API_KEY=choose-a-long-random-string
+modal deploy modal_vllm_nemotron.py
+```
+
+If the model requires Hugging Face auth in your account, create the same secret with both values instead:
+
+```bash
+modal secret create mythograph-vllm VLLM_API_KEY=choose-a-long-random-string HF_TOKEN=your_huggingface_token
+```
+
+After deploy, copy the Modal URL and add `/v1` for the Space base URL.
+
+Quick Modal checks:
+
+```bash
+curl https://YOUR-MODAL-APP.modal.run/health
+curl https://YOUR-MODAL-APP.modal.run/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_VLLM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"nemotron-nano-9b-v2\",\"messages\":[{\"role\":\"user\",\"content\":\"Return one short sentence.\"}],\"max_tokens\":40}"
+```
+
+HF Space variables for Modal:
+
+```text
+MYTHOGRAPH_LLM_MODE=local
+MYTHOGRAPH_LLM_BASE_URL=https://YOUR-MODAL-APP.modal.run/v1
+MYTHOGRAPH_LLM_MODEL=nemotron-nano-9b-v2
+MYTHOGRAPH_LLM_API_KEY=YOUR_VLLM_API_KEY
+MYTHOGRAPH_LLM_SOURCE_LABEL=modal
+MYTHOGRAPH_LLM_TIMEOUT_SECONDS=120
+MYTHOGRAPH_CONVERSATION_MODE=model_assisted
+MYTHOGRAPH_MODEL_UI_DIRECTOR=0
+MYTHOGRAPH_IMAGE_MODE=flux
+```
+
+Later, the same app path can use Hugging Face Inference Providers and HF credits:
+
+```text
+MYTHOGRAPH_LLM_MODE=local
+MYTHOGRAPH_LLM_BASE_URL=https://router.huggingface.co/v1
+MYTHOGRAPH_LLM_MODEL=<provider-supported-model>
+MYTHOGRAPH_LLM_API_KEY=<HF token with Inference Providers permission>
+MYTHOGRAPH_LLM_SOURCE_LABEL=hf-router
+MYTHOGRAPH_CONVERSATION_MODE=model_assisted
+```
 
 ## llama.cpp Badge Path
 

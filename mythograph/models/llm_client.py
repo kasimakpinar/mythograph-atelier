@@ -16,9 +16,13 @@ from mythograph.config import (
     LLAMACPP_N_GPU_LAYERS,
     LLAMACPP_REPO_ID,
     LLAMACPP_VERBOSE,
+    LLM_API_KEY,
     LLM_BASE_URL,
+    LLM_MAX_TOKENS,
     LLM_MODE,
     LLM_MODEL,
+    LLM_SOURCE_LABEL,
+    LLM_TEMPERATURE,
     LLM_TIMEOUT_SECONDS,
 )
 
@@ -38,11 +42,19 @@ class LLMClient:
         base_url: str = LLM_BASE_URL,
         model: str = LLM_MODEL,
         timeout: float = LLM_TIMEOUT_SECONDS,
+        api_key: str = LLM_API_KEY,
+        source_label: str = LLM_SOURCE_LABEL,
+        max_tokens: int = LLM_MAX_TOKENS,
+        temperature: float = LLM_TEMPERATURE,
     ) -> None:
         self.mode = mode
         self.base_url = base_url
         self.model = model
         self.timeout = timeout
+        self.api_key = api_key
+        self.source_label = source_label
+        self.max_tokens = max_tokens
+        self.temperature = temperature
 
     def complete_json(self, system_prompt: str, user_payload: dict[str, Any]) -> LLMResponse:
         if self.mode == "mock":
@@ -56,22 +68,27 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
             ],
-            "temperature": 0.7,
-            "max_tokens": 1200,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
         }
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = json.loads(response.read().decode("utf-8"))
             content = raw["choices"][0]["message"]["content"]
-            return LLMResponse(content=content, source="local", raw=raw)
-        except (KeyError, json.JSONDecodeError, TimeoutError, urllib.error.URLError) as exc:
+            source = self.source_label or "local"
+            return LLMResponse(content=content, source=source, raw=raw)
+        except (KeyError, json.JSONDecodeError, TimeoutError, urllib.error.URLError, OSError) as exc:
             return LLMResponse(content="", source="fallback", error=str(exc))
 
 
@@ -86,8 +103,8 @@ class LlamaCppClient:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
                 ],
-                temperature=0.7,
-                max_tokens=1200,
+                temperature=LLM_TEMPERATURE,
+                max_tokens=LLM_MAX_TOKENS,
             )
             content = raw["choices"][0]["message"]["content"]
             return LLMResponse(content=content, source="llamacpp", raw=raw)
@@ -126,6 +143,10 @@ def runtime_status() -> dict[str, Any]:
         "mode": LLM_MODE,
         "openai_compatible_base_url": LLM_BASE_URL,
         "openai_compatible_model": LLM_MODEL,
+        "openai_compatible_source_label": LLM_SOURCE_LABEL or "local",
+        "openai_compatible_auth": bool(LLM_API_KEY),
+        "llm_max_tokens": LLM_MAX_TOKENS,
+        "llm_temperature": LLM_TEMPERATURE,
     }
     if LLM_MODE == "llamacpp":
         status.update(

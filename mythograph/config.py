@@ -11,8 +11,13 @@ OUTPUT_DIR = ROOT_DIR / "outputs"
 LLM_MODE = os.getenv("MYTHOGRAPH_LLM_MODE", "mock").strip().lower()
 LLM_BASE_URL = os.getenv("MYTHOGRAPH_LLM_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
 LLM_MODEL = os.getenv("MYTHOGRAPH_LLM_MODEL", "local-art-director")
+LLM_API_KEY = os.getenv("MYTHOGRAPH_LLM_API_KEY", "").strip()
+LLM_SOURCE_LABEL = os.getenv("MYTHOGRAPH_LLM_SOURCE_LABEL", "").strip()
+LLM_MAX_TOKENS = int(os.getenv("MYTHOGRAPH_LLM_MAX_TOKENS", "1200"))
+LLM_TEMPERATURE = float(os.getenv("MYTHOGRAPH_LLM_TEMPERATURE", "0.7"))
 LLM_TIMEOUT_SECONDS = float(os.getenv("MYTHOGRAPH_LLM_TIMEOUT_SECONDS", "30"))
 MODEL_UI_DIRECTOR_ENABLED = os.getenv("MYTHOGRAPH_MODEL_UI_DIRECTOR", "0").strip() == "1"
+CONVERSATION_MODE = os.getenv("MYTHOGRAPH_CONVERSATION_MODE", "deterministic").strip().lower()
 
 LLAMACPP_REPO_ID = os.getenv("MYTHOGRAPH_LLAMACPP_REPO_ID", "lmstudio-community/Qwen3.5-0.8B-GGUF")
 LLAMACPP_FILENAME = os.getenv("MYTHOGRAPH_LLAMACPP_FILENAME", "Qwen3.5-0.8B-Q4_K_M.gguf")

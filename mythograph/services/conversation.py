@@ -1,3 +1,7 @@
+import time
+
+from mythograph.config import CONVERSATION_MODE, ROOT_DIR
+from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn, DynamicControl, SliderSpec
 from mythograph.services.interview import (
@@ -39,6 +43,8 @@ def advance_conversation(
     profile: InterviewProfile | None = None,
     user_message: str = "",
     control_response: ControlResponse | None = None,
+    chat_history: list[dict[str, str]] | None = None,
+    client: LLMClient | None = None,
 ) -> tuple[InterviewProfile, ConversationTurn]:
     profile = profile or new_profile()
     clean_message = (user_message or "").strip()
@@ -50,7 +56,8 @@ def advance_conversation(
         apply_control_response(profile, control_response)
 
     profile = update_scores(profile)
-    turn = choose_conversation_turn(profile)
+    fallback_turn = choose_conversation_turn(profile)
+    turn = choose_conversation_turn_with_model(profile, fallback_turn, chat_history or [], client)
     log_event(
         "conversation_turn",
         {
@@ -67,6 +74,158 @@ def advance_conversation(
         },
     )
     return profile, turn
+
+
+def choose_conversation_turn_with_model(
+    profile: InterviewProfile,
+    fallback_turn: ConversationTurn,
+    chat_history: list[dict[str, str]] | None = None,
+    client: LLMClient | None = None,
+) -> ConversationTurn:
+    if CONVERSATION_MODE != "model_assisted":
+        return fallback_turn
+
+    llm = client or LLMClient()
+    system_prompt = (ROOT_DIR / "mythograph" / "prompts" / "conversation_director_system.txt").read_text(
+        encoding="utf-8"
+    )
+    started = time.perf_counter()
+    response = llm.complete_json(
+        system_prompt,
+        {
+            "profile": profile.model_dump(),
+            "chat_history": (chat_history or [])[-10:],
+            "fallback_turn": fallback_turn.model_dump(),
+            "allowed_control_kinds": [kind.value for kind in ControlKind],
+            "available_option_sets": {
+                "ideas": IDEA_OPTIONS,
+                "styles": STYLE_OPTIONS,
+                "symbols": SYMBOL_OPTIONS,
+                "contrasts": CONTRAST_OPTIONS,
+                "palette_moods": PALETTE_OPTIONS,
+            },
+        },
+    )
+    elapsed_seconds = round(time.perf_counter() - started, 3)
+
+    if response.source == "mock" or response.error:
+        log_event(
+            "llm_conversation_turn",
+            {
+                "source": response.source,
+                "elapsed_seconds": elapsed_seconds,
+                "error": response.error,
+                "transport_error": response.error,
+                "raw_content": response.content,
+                "used_fallback": True,
+                "turn": fallback_turn.model_dump(),
+            },
+        )
+        return fallback_turn
+
+    try:
+        candidate = ConversationTurn.model_validate(extract_json_object(response.content))
+        candidate = sanitize_conversation_turn(candidate, fallback_turn)
+    except Exception as exc:
+        log_event(
+            "llm_conversation_turn",
+            {
+                "source": response.source,
+                "elapsed_seconds": elapsed_seconds,
+                "error": str(exc),
+                "transport_error": response.error,
+                "raw_content": response.content,
+                "used_fallback": True,
+                "turn": fallback_turn.model_dump(),
+            },
+        )
+        return fallback_turn
+
+    log_event(
+        "llm_conversation_turn",
+        {
+            "source": response.source,
+            "elapsed_seconds": elapsed_seconds,
+            "transport_error": response.error,
+            "raw_content": response.content,
+            "used_fallback": False,
+            "turn": candidate.model_dump(),
+        },
+    )
+    return candidate
+
+
+def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: ConversationTurn) -> ConversationTurn:
+    if not candidate.controls:
+        candidate.controls = fallback_turn.controls
+    candidate.controls = [candidate.controls[0]]
+    control = candidate.controls[0]
+
+    if candidate.is_ready and not fallback_turn.is_ready:
+        return fallback_turn
+    if fallback_turn.is_ready:
+        candidate.is_ready = True
+        candidate.controls = [
+            DynamicControl(
+                kind=ControlKind.READY_BUTTON,
+                label="Create artwork",
+                prompt="Generate the painting",
+                options=["Create artwork"],
+            )
+        ]
+        return candidate
+
+    if control.kind == ControlKind.READY_BUTTON:
+        return fallback_turn
+
+    if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
+        control.options = _sanitize_options(control.options, fallback_turn.controls[0].options if fallback_turn.controls else [])
+    elif control.kind == ControlKind.SLIDER_GROUP:
+        control.sliders = _sanitize_sliders(control.sliders)
+    elif control.kind == ControlKind.TEXT_REFINEMENT:
+        control.options = []
+        control.sliders = []
+
+    if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER} and not control.options:
+        return fallback_turn
+    if control.kind == ControlKind.SLIDER_GROUP and not control.sliders:
+        return fallback_turn
+    return candidate
+
+
+def _sanitize_options(options: list[str], fallback_options: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for option in options:
+        value = str(option).strip()
+        if value and value not in cleaned:
+            cleaned.append(value)
+        if len(cleaned) >= 6:
+            break
+    if cleaned:
+        return cleaned
+    return fallback_options[:6]
+
+
+def _sanitize_sliders(sliders: list[SliderSpec]) -> list[SliderSpec]:
+    cleaned: list[SliderSpec] = []
+    for slider in sliders:
+        key = slider.key.strip() or f"slider_{len(cleaned) + 1}"
+        label = slider.label.strip() or key.replace("_", " ").title()
+        left_label = slider.left_label.strip() or "less"
+        right_label = slider.right_label.strip() or "more"
+        value = max(0, min(100, int(slider.value)))
+        cleaned.append(
+            SliderSpec(
+                key=key,
+                label=label,
+                left_label=left_label,
+                right_label=right_label,
+                value=value,
+            )
+        )
+        if len(cleaned) >= 3:
+            break
+    return cleaned
 
 
 def should_generate(profile: InterviewProfile) -> bool:
