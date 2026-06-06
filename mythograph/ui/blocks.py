@@ -1,7 +1,7 @@
 import gradio as gr
 import spaces
 
-from mythograph.config import APP_TITLE, ROOT_DIR
+from mythograph.config import APP_TITLE, MODEL_UI_DIRECTOR_ENABLED, ROOT_DIR
 from mythograph.models.llm_client import runtime_status
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import UIAction
@@ -9,6 +9,7 @@ from mythograph.services.art_recipe import build_art_recipe_with_model
 from mythograph.services.generation import generate_fallback_image
 from mythograph.services.interview import (
     apply_answer,
+    choose_next_ui,
     choose_next_ui_with_model,
     new_profile,
     start_with_surprise,
@@ -88,6 +89,13 @@ def build_demo() -> gr.Blocks:
                 )
                 regen_button = gr.Button("Apply regeneration", visible=False)
                 image_prompt = gr.Textbox(label="Image prompt", lines=4, visible=False)
+                with gr.Accordion("Model activity", open=False):
+                    model_activity = gr.Textbox(
+                        label="Activity",
+                        lines=7,
+                        visible=False,
+                        interactive=False,
+                    )
                 trace_file = gr.File(label="Trace export", visible=False)
                 trace_button = gr.Button("Download trace", visible=False)
 
@@ -169,12 +177,32 @@ def build_demo() -> gr.Blocks:
         create_now.click(
             fn=_generate,
             inputs=[profile_state, recipe_state],
-            outputs=[image_output, gallery_label, symbol_map, image_prompt, regen, regen_button, trace_button, recipe_state],
+            outputs=[
+                image_output,
+                gallery_label,
+                symbol_map,
+                image_prompt,
+                regen,
+                regen_button,
+                trace_button,
+                recipe_state,
+                model_activity,
+            ],
         )
         regen_button.click(
             fn=_regenerate,
             inputs=[profile_state, recipe_state, regen],
-            outputs=[image_output, gallery_label, symbol_map, image_prompt, regen, regen_button, trace_button, recipe_state],
+            outputs=[
+                image_output,
+                gallery_label,
+                symbol_map,
+                image_prompt,
+                regen,
+                regen_button,
+                trace_button,
+                recipe_state,
+                model_activity,
+            ],
         )
         trace_button.click(
             fn=_export_trace,
@@ -201,6 +229,7 @@ def build_demo() -> gr.Blocks:
                 trace_button,
                 trace_file,
                 recipe_state,
+                model_activity,
             ],
         )
 
@@ -228,8 +257,14 @@ def _profile(data: dict) -> InterviewProfile:
 
 
 def _render_next(profile: InterviewProfile):
-    next_ui = choose_next_ui_with_model(profile)
+    if MODEL_UI_DIRECTOR_ENABLED:
+        next_ui = choose_next_ui_with_model(profile)
+        director_source = "model_enabled"
+    else:
+        next_ui = choose_next_ui(profile)
+        director_source = "deterministic_fast_path"
     log_event("next_ui", {"profile": profile.model_dump(), "next_ui": next_ui.model_dump()})
+    log_event("ui_director_mode", {"source": director_source})
     return [
         profile.model_dump(),
         next_ui.next_action.value,
@@ -287,28 +322,66 @@ def _submit_visuals(data: dict, minimal_rich: float, calm_intense: float, geomet
     return _render_next(profile)
 
 
-@spaces.GPU(duration=20)
+@spaces.GPU(duration=180)
 def _generate(data: dict, recipe_data: dict | None):
     profile = _profile(data)
+    yield _pending_outputs(
+        "Starting generation...\n"
+        f"Runtime mode: {runtime_status()['mode']}\n"
+        "Calling the art director. The first llama.cpp call may include model download/load time.",
+        recipe_data,
+    )
     recipe = build_art_recipe_with_model(profile)
+    yield _pending_outputs(
+        "Art recipe ready.\n"
+        f"Title: {recipe.title}\n"
+        "Rendering fallback painting now.",
+        recipe.model_dump(),
+    )
     path = generate_fallback_image(recipe)
     log_event("generate", {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": path})
-    return _gallery_outputs(path, recipe)
+    yield _gallery_outputs(path, recipe, "Generation complete.\nDownload the trace to confirm model source and fallback status.")
 
 
-@spaces.GPU(duration=20)
+@spaces.GPU(duration=180)
 def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
     profile = _profile(data)
+    yield _pending_outputs(
+        "Starting regeneration...\n"
+        f"Instruction: {instruction or 'Surprise me'}\n"
+        f"Runtime mode: {runtime_status()['mode']}",
+        recipe_data,
+    )
     recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
+    yield _pending_outputs(
+        "Updated recipe ready.\n"
+        f"Title: {recipe.title}\n"
+        "Rendering fallback painting now.",
+        recipe.model_dump(),
+    )
     path = generate_fallback_image(recipe)
     log_event(
         "regenerate",
         {"profile": profile.model_dump(), "instruction": instruction, "recipe": recipe.model_dump(), "image_path": path},
     )
-    return _gallery_outputs(path, recipe)
+    yield _gallery_outputs(path, recipe, "Regeneration complete.\nDownload the trace to confirm model source and fallback status.")
 
 
-def _gallery_outputs(path: str, recipe):
+def _pending_outputs(activity: str, recipe_data: dict | None):
+    return [
+        None,
+        "### Working...",
+        "",
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        recipe_data,
+        gr.update(value=activity, visible=True),
+    ]
+
+
+def _gallery_outputs(path: str, recipe, activity: str):
     label = f"## {recipe.title}\n\n{recipe.friend_explanation}"
     symbol_rows = "\n".join(f"| {symbol.visual} | {symbol.meaning} |" for symbol in recipe.symbols)
     symbols = f"| Visual element | Meaning |\n|---|---|\n{symbol_rows}"
@@ -321,6 +394,7 @@ def _gallery_outputs(path: str, recipe):
         gr.update(visible=True),
         gr.update(visible=True),
         recipe.model_dump(),
+        gr.update(value=activity, visible=True),
     ]
 
 
@@ -349,4 +423,5 @@ def _reset():
         gr.update(visible=False),
         gr.update(value=None, visible=False),
         None,
+        gr.update(value="", visible=False),
     ]

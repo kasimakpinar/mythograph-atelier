@@ -65,6 +65,14 @@ python app.py
 
 For the final Space, the same variables can point at a larger hackathon-eligible model, as long as total model parameters stay at or below 32B.
 
+By default, the dynamic interview uses the deterministic fast path even when model mode is enabled. This keeps each question responsive while testing llama.cpp on the final Create step.
+
+```bash
+MYTHOGRAPH_MODEL_UI_DIRECTOR=0
+```
+
+Set `MYTHOGRAPH_MODEL_UI_DIRECTOR=1` only when testing a fast enough text model for every interview turn.
+
 Target model for the text/art director layer:
 
 ```bash
@@ -87,6 +95,7 @@ MYTHOGRAPH_LLAMACPP_REPO_ID=lmstudio-community/Qwen3.5-0.8B-GGUF
 MYTHOGRAPH_LLAMACPP_FILENAME=Qwen3.5-0.8B-Q4_K_M.gguf
 MYTHOGRAPH_LLAMACPP_N_CTX=2048
 MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
+MYTHOGRAPH_MODEL_UI_DIRECTOR=0
 ```
 
 Nemotron demo settings:
