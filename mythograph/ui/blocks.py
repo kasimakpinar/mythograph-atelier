@@ -322,7 +322,7 @@ def _submit_visuals(data: dict, minimal_rich: float, calm_intense: float, geomet
     return _render_next(profile)
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=300)
 def _generate(data: dict, recipe_data: dict | None):
     profile = _profile(data)
     yield _pending_outputs(
@@ -356,7 +356,7 @@ def _generate(data: dict, recipe_data: dict | None):
     )
 
 
-@spaces.GPU(duration=180)
+@spaces.GPU(duration=300)
 def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
     profile = _profile(data)
     yield _pending_outputs(

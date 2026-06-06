@@ -68,6 +68,8 @@ MYTHOGRAPH_IMAGE_STEPS=8
 
 HF Spaces only installs `requirements.txt` automatically. When we are ready to test FLUX, Codex should temporarily move the dependencies from `requirements-image.txt` into `requirements.txt`, commit, and push. Use it only when testing this backend on suitable GPU hardware. If FLUX fails to load or generate, the app falls back to Pillow and records the error in the `image_generation` trace event.
 
+FLUX.2-klein does not currently use a `negative_prompt` argument in this app path. The prompt itself still asks for no text, letters, signatures, or watermarks.
+
 ## Local LLM Configuration
 
 The app defaults to safe mock mode so the Space remains usable even when no model server is running.

@@ -30,11 +30,11 @@ class ImageClient:
             pipe = self._load_flux_pipeline()
             image_kwargs = {
                 "prompt": recipe.image_prompt,
-                "negative_prompt": recipe.negative_prompt,
                 "num_inference_steps": IMAGE_STEPS,
                 "width": IMAGE_WIDTH,
                 "height": IMAGE_HEIGHT,
             }
+            negative_prompt = recipe.negative_prompt
             try:
                 import torch
 
@@ -42,7 +42,7 @@ class ImageClient:
             except Exception:
                 pass
 
-            image = pipe(**image_kwargs).images[0]
+            image = self._run_flux_pipeline(pipe, image_kwargs, negative_prompt).images[0]
             OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             path = OUTPUT_DIR / f"flux_{abs(hash(recipe.image_prompt)) % 10_000_000}.png"
             image.save(path)
@@ -73,3 +73,12 @@ class ImageClient:
             device_map="cuda",
         )
         return cls._flux_pipe
+
+    @staticmethod
+    def _run_flux_pipeline(pipe, image_kwargs, negative_prompt):
+        try:
+            return pipe(**image_kwargs, negative_prompt=negative_prompt)
+        except TypeError as exc:
+            if "negative_prompt" not in str(exc):
+                raise
+            return pipe(**image_kwargs)
