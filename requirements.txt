@@ -2,3 +2,4 @@ gradio>=5.0,<6.0
 pillow>=10.0
 pydantic>=2.7
 numpy>=1.26
+spaces>=0.40.0

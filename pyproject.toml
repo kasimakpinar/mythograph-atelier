@@ -9,6 +9,7 @@ dependencies = [
   "numpy>=1.26",
   "pillow>=10.0",
   "pydantic>=2.7",
+  "spaces>=0.40.0",
 ]
 
 [tool.uv]

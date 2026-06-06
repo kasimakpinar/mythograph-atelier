@@ -11,7 +11,7 @@ class ObjectiveScores(BaseModel):
 
 class InterviewProfile(BaseModel):
     ideas: list[str] = Field(default_factory=list)
-    visual_preferences: dict[str, float | str] = Field(default_factory=dict)
+    visual_preferences: dict[str, int | float | str] = Field(default_factory=dict)
     styles: list[str] = Field(default_factory=list)
     symbols: list[str] = Field(default_factory=list)
     contrasts: list[str] = Field(default_factory=list)

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import gradio as gr
+import spaces
 
 from mythograph.config import APP_TITLE, ROOT_DIR
 from mythograph.schemas.profile import InterviewProfile
@@ -266,6 +267,7 @@ def _submit_visuals(data: dict, minimal_rich: float, calm_intense: float, geomet
     return _render_next(profile)
 
 
+@spaces.GPU(duration=20)
 def _generate(data: dict, recipe_data: dict | None):
     profile = _profile(data)
     recipe = build_art_recipe(profile)
@@ -274,6 +276,7 @@ def _generate(data: dict, recipe_data: dict | None):
     return _gallery_outputs(path, recipe)
 
 
+@spaces.GPU(duration=20)
 def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
     profile = _profile(data)
     recipe = build_art_recipe(profile, instruction or "Surprise me")
