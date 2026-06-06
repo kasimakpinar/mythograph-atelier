@@ -46,6 +46,25 @@ python app.py
 - Image generation: FLUX.2-klein or another hackathon-eligible small image model.
 - Fine-tuned art director: optional LoRA/SFT model for structured art recipes.
 
+## Local LLM Configuration
+
+The app defaults to safe mock mode so the Space remains usable even when no model server is running.
+
+```bash
+MYTHOGRAPH_LLM_MODE=mock python app.py
+```
+
+To test with a small local llama.cpp/OpenAI-compatible model:
+
+```bash
+MYTHOGRAPH_LLM_MODE=local \
+MYTHOGRAPH_LLM_BASE_URL=http://127.0.0.1:8080/v1 \
+MYTHOGRAPH_LLM_MODEL=tiny-local-test-model \
+python app.py
+```
+
+For the final Space, the same variables can point at a larger hackathon-eligible model, as long as total model parameters stay at or below 32B.
+
 ## Development With Codex
 
 This project was developed with OpenAI Codex as a local coding collaborator. The submitted app is designed not to call OpenAI APIs at runtime.

@@ -1,20 +1,18 @@
-from pathlib import Path
-
 import gradio as gr
 import spaces
 
 from mythograph.config import APP_TITLE, ROOT_DIR
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import UIAction
-from mythograph.services.art_recipe import build_art_recipe
+from mythograph.services.art_recipe import build_art_recipe_with_model
 from mythograph.services.generation import generate_fallback_image
 from mythograph.services.interview import (
     apply_answer,
-    choose_next_ui,
+    choose_next_ui_with_model,
     new_profile,
     start_with_surprise,
 )
-from mythograph.services.trace_logger import log_event
+from mythograph.services.trace_logger import export_trace, log_event
 from mythograph.ui.examples import REGENERATION_OPTIONS, STARTER_IDEAS
 
 
@@ -88,6 +86,8 @@ def build_demo() -> gr.Blocks:
                 )
                 regen_button = gr.Button("Apply regeneration", visible=False)
                 image_prompt = gr.Textbox(label="Image prompt", lines=4, visible=False)
+                trace_file = gr.File(label="Trace export", visible=False)
+                trace_button = gr.Button("Download trace", visible=False)
 
         submit_text.click(
             fn=_submit_free_text,
@@ -167,12 +167,16 @@ def build_demo() -> gr.Blocks:
         create_now.click(
             fn=_generate,
             inputs=[profile_state, recipe_state],
-            outputs=[image_output, gallery_label, symbol_map, image_prompt, regen, regen_button, recipe_state],
+            outputs=[image_output, gallery_label, symbol_map, image_prompt, regen, regen_button, trace_button, recipe_state],
         )
         regen_button.click(
             fn=_regenerate,
             inputs=[profile_state, recipe_state, regen],
-            outputs=[image_output, gallery_label, symbol_map, image_prompt, regen, regen_button, recipe_state],
+            outputs=[image_output, gallery_label, symbol_map, image_prompt, regen, regen_button, trace_button, recipe_state],
+        )
+        trace_button.click(
+            fn=_export_trace,
+            outputs=trace_file,
         )
         reset_button.click(
             fn=_reset,
@@ -192,6 +196,8 @@ def build_demo() -> gr.Blocks:
                 image_prompt,
                 regen,
                 regen_button,
+                trace_button,
+                trace_file,
                 recipe_state,
             ],
         )
@@ -208,7 +214,7 @@ def _profile(data: dict) -> InterviewProfile:
 
 
 def _render_next(profile: InterviewProfile):
-    next_ui = choose_next_ui(profile)
+    next_ui = choose_next_ui_with_model(profile)
     log_event("next_ui", {"profile": profile.model_dump(), "next_ui": next_ui.model_dump()})
     return [
         profile.model_dump(),
@@ -270,7 +276,7 @@ def _submit_visuals(data: dict, minimal_rich: float, calm_intense: float, geomet
 @spaces.GPU(duration=20)
 def _generate(data: dict, recipe_data: dict | None):
     profile = _profile(data)
-    recipe = build_art_recipe(profile)
+    recipe = build_art_recipe_with_model(profile)
     path = generate_fallback_image(recipe)
     log_event("generate", {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": path})
     return _gallery_outputs(path, recipe)
@@ -279,7 +285,7 @@ def _generate(data: dict, recipe_data: dict | None):
 @spaces.GPU(duration=20)
 def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
     profile = _profile(data)
-    recipe = build_art_recipe(profile, instruction or "Surprise me")
+    recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
     path = generate_fallback_image(recipe)
     log_event(
         "regenerate",
@@ -299,8 +305,13 @@ def _gallery_outputs(path: str, recipe):
         gr.update(value=recipe.image_prompt, visible=True),
         gr.update(visible=True),
         gr.update(visible=True),
+        gr.update(visible=True),
         recipe.model_dump(),
     ]
+
+
+def _export_trace():
+    return gr.update(value=export_trace(), visible=True)
 
 
 def _reset():
@@ -321,5 +332,7 @@ def _reset():
         gr.update(value="", visible=False),
         gr.update(value=None, visible=False),
         gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(value=None, visible=False),
         None,
     ]

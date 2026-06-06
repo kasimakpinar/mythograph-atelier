@@ -1,5 +1,8 @@
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import NextUI, UIAction
+from mythograph.config import ROOT_DIR
+from mythograph.models.llm_client import LLMClient, extract_json_object
+from mythograph.services.trace_logger import log_event
 
 
 IDEA_OPTIONS = [
@@ -107,6 +110,67 @@ def choose_next_ui(profile: InterviewProfile) -> NextUI:
         question="Should the painting comfort you or challenge you?",
         options=CONTRAST_OPTIONS,
     )
+
+
+def choose_next_ui_with_model(profile: InterviewProfile, client: LLMClient | None = None) -> NextUI:
+    fallback = choose_next_ui(profile)
+    llm = client or LLMClient()
+    system_prompt = (ROOT_DIR / "mythograph" / "prompts" / "interviewer_system.txt").read_text(encoding="utf-8")
+    response = llm.complete_json(
+        system_prompt,
+        {
+            "profile": profile.model_dump(),
+            "objective_scores": profile.scores.model_dump(),
+            "fallback_next_ui": fallback.model_dump(),
+            "allowed_actions": [action.value for action in UIAction],
+        },
+    )
+
+    if response.source == "mock":
+        log_event("llm_ui_director", {"source": "mock", "used_fallback": True, "next_ui": fallback.model_dump()})
+        return fallback
+
+    try:
+        candidate = NextUI.model_validate(extract_json_object(response.content))
+    except Exception as exc:
+        log_event(
+            "llm_ui_director",
+            {
+                "source": response.source,
+                "error": str(exc),
+                "raw_content": response.content,
+                "used_fallback": True,
+                "next_ui": fallback.model_dump(),
+            },
+        )
+        return fallback
+
+    candidate = _sanitize_next_ui(candidate, fallback)
+    log_event(
+        "llm_ui_director",
+        {
+            "source": response.source,
+            "raw_content": response.content,
+            "used_fallback": False,
+            "next_ui": candidate.model_dump(),
+        },
+    )
+    return candidate
+
+
+def _sanitize_next_ui(candidate: NextUI, fallback: NextUI) -> NextUI:
+    if candidate.next_action == UIAction.READY_TO_GENERATE and fallback.next_action != UIAction.READY_TO_GENERATE:
+        return fallback
+    if candidate.next_action == UIAction.SHOW_VISUAL_SLIDERS:
+        candidate.options = []
+    if candidate.next_action in {
+        UIAction.SHOW_IDEA_CARDS,
+        UIAction.SHOW_STYLE_CARDS,
+        UIAction.SHOW_SYMBOL_CARDS,
+        UIAction.ASK_CONTRAST,
+    } and not candidate.options:
+        candidate.options = fallback.options
+    return candidate
 
 
 def apply_answer(profile: InterviewProfile, action: str, answer: str, visual_values: dict[str, float] | None = None) -> InterviewProfile:
