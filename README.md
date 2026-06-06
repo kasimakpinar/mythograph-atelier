@@ -125,12 +125,22 @@ MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
 MYTHOGRAPH_MODEL_UI_DIRECTOR=0
 ```
 
-Nemotron demo settings:
+Recommended Nemotron demo settings:
 
 ```bash
 MYTHOGRAPH_LLM_MODE=llamacpp
-MYTHOGRAPH_LLAMACPP_REPO_ID=Triangle104/OpenReasoning-Nemotron-32B-Q4_K_M-GGUF
-MYTHOGRAPH_LLAMACPP_FILENAME=*q4_k_m.gguf
+MYTHOGRAPH_LLAMACPP_REPO_ID=bartowski/nvidia_NVIDIA-Nemotron-Nano-9B-v2-GGUF
+MYTHOGRAPH_LLAMACPP_FILENAME=nvidia_NVIDIA-Nemotron-Nano-9B-v2-Q4_K_M.gguf
+MYTHOGRAPH_LLAMACPP_N_CTX=2048
+MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
+```
+
+Experimental 32B settings, only after the 9B run works:
+
+```bash
+MYTHOGRAPH_LLM_MODE=llamacpp
+MYTHOGRAPH_LLAMACPP_REPO_ID=bartowski/nvidia_OpenReasoning-Nemotron-32B-GGUF
+MYTHOGRAPH_LLAMACPP_FILENAME=nvidia_OpenReasoning-Nemotron-32B-Q4_K_M.gguf
 MYTHOGRAPH_LLAMACPP_N_CTX=4096
 MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
 ```
