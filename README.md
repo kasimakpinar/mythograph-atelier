@@ -65,6 +65,16 @@ python app.py
 
 For the final Space, the same variables can point at a larger hackathon-eligible model, as long as total model parameters stay at or below 32B.
 
+Target model for the text/art director layer:
+
+```bash
+MYTHOGRAPH_LLM_MODE=local
+MYTHOGRAPH_LLM_BASE_URL=http://127.0.0.1:8000/v1
+MYTHOGRAPH_LLM_MODEL=nvidia/OpenReasoning-Nemotron-32B
+```
+
+The current public Space intentionally defaults to mock mode until a model server is added to the Space runtime or attached as a local OpenAI-compatible service.
+
 ## Development With Codex
 
 This project was developed with OpenAI Codex as a local coding collaborator. The submitted app is designed not to call OpenAI APIs at runtime.

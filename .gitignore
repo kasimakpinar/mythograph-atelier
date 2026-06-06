@@ -9,6 +9,7 @@ data/traces.jsonl
 data/mythograph_trace_export.jsonl
 server.log
 server.err
+PROJECT_PLAN_Mythograph_Atelier.md
 
 .env
 .env.*

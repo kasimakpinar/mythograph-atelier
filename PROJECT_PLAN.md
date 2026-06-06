@@ -1,8 +1,8 @@
 # Project Plan
 
-The full planning document lives at:
+The full planning document is kept in the repository root as `PROJECT_PLAN_Mythograph_Atelier.md`.
 
-`C:\Users\kasim\Documents\PROJECT_PLAN_Mythograph_Atelier.md`
+It is intentionally ignored by Git because it is a working planning artifact rather than part of the shipped Space.
 
 This repository starts with the MVP implementation path:
 
