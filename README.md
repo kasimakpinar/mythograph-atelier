@@ -66,7 +66,7 @@ MYTHOGRAPH_IMAGE_HEIGHT=1024
 MYTHOGRAPH_IMAGE_STEPS=8
 ```
 
-Install `requirements-image.txt` only when testing this backend on suitable GPU hardware. If FLUX fails to load or generate, the app falls back to Pillow and records the error in the `image_generation` trace event.
+HF Spaces only installs `requirements.txt` automatically. When we are ready to test FLUX, Codex should temporarily move the dependencies from `requirements-image.txt` into `requirements.txt`, commit, and push. Use it only when testing this backend on suitable GPU hardware. If FLUX fails to load or generate, the app falls back to Pillow and records the error in the `image_generation` trace event.
 
 ## Local LLM Configuration
 
