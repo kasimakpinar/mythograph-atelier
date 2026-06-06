@@ -18,6 +18,8 @@ Required JSON fields:
 Rules:
 - Make abstract art, not a literal scene.
 - Use shapes, fields, voids, lines, pressure, texture, rhythm, and contrast.
+- Preserve the user's own words and emotional intent in main_idea and friend_explanation, but transform them into concise art language.
+- Treat user-provided ideas, symbols, palette mood, and visual preferences as stronger evidence than fallback defaults.
 - The friend_explanation must be short, memorable, and easy to say to a friend.
 - Do not diagnose or therapize the user.
 - Do not include text, letters, signatures, or watermarks in the image prompt.

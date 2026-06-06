@@ -1,243 +1,248 @@
 import gradio as gr
 import spaces
 
-from mythograph.config import APP_TITLE, MODEL_UI_DIRECTOR_ENABLED, ROOT_DIR
+from mythograph.config import APP_TITLE, ROOT_DIR
 from mythograph.models.image_client import ImageClient
 from mythograph.models.llm_client import runtime_status
 from mythograph.schemas.profile import InterviewProfile
-from mythograph.schemas.ui import UIAction
+from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn
 from mythograph.services.art_recipe import build_art_recipe_with_model
-from mythograph.services.interview import (
-    apply_answer,
-    choose_next_ui,
-    choose_next_ui_with_model,
-    new_profile,
-    start_with_surprise,
-)
+from mythograph.services.conversation import advance_conversation, new_profile, start_session
 from mythograph.services.trace_logger import export_trace, log_event
 from mythograph.ui.examples import REGENERATION_OPTIONS, STARTER_IDEAS
 
 
+STARTER_CHIPS = STARTER_IDEAS[:3]
+
+
 def build_demo() -> gr.Blocks:
     css = (ROOT_DIR / "mythograph" / "ui" / "styles.css").read_text(encoding="utf-8")
+    initial_turn = start_session()
 
     with gr.Blocks(title=APP_TITLE, css=css, elem_id="ma-shell", theme=gr.themes.Base()) as demo:
         profile_state = gr.State(new_profile().model_dump())
-        action_state = gr.State(UIAction.ASK_FREE_TEXT.value)
+        chat_history_state = gr.State([])
+        turn_state = gr.State(initial_turn.model_dump())
         recipe_state = gr.State(None)
 
-        gr.HTML(
-            """
-            <section id="ma-hero">
-              <h1>Mythograph Atelier</h1>
-              <p>Create abstract art backwards: choose the meaning first, let the atelier turn it into symbols, color, and a story you can tell a friend.</p>
-            </section>
-            """,
-            container=False,
-        )
+        with gr.Group(elem_id="ma-start-panel") as start_panel:
+            gr.HTML(
+                """
+                <section class="ma-start">
+                  <div class="ma-kicker">Mythograph Atelier</div>
+                  <h1>Tell the painting what it has to mean.</h1>
+                  <p>The atelier will ask only what it needs, then turn your answers into abstract art with a story you can say out loud.</p>
+                </section>
+                """,
+                container=False,
+            )
+            start_prompt = gr.Textbox(
+                label="",
+                placeholder="I want something about ambition, patience, and becoming stronger slowly.",
+                lines=3,
+                max_lines=6,
+                elem_id="ma-start-input",
+                show_label=False,
+            )
+            with gr.Row(elem_classes=["ma-start-actions"]):
+                start_submit = gr.Button("Begin", variant="primary", elem_classes=["ma-send"])
+                reset_from_start = gr.Button("Reset", elem_classes=["ma-ghost"])
+            with gr.Row(elem_classes=["ma-starters"]):
+                starter_buttons = [
+                    gr.Button(title, elem_classes=["ma-chip"], size="sm")
+                    for title, _text in STARTER_CHIPS
+                ]
 
-        with gr.Row(elem_classes=["ma-stage"]):
-            with gr.Column(scale=4):
-                assistant_message = gr.Markdown(
-                    "Choose a starting idea, write your own, or ask the atelier to surprise you.",
-                    elem_classes=["ma-note"],
-                )
-                gr.Markdown(_format_runtime_status(), elem_classes=["ma-note"])
-                custom_idea = gr.Textbox(
-                    label="Start with your own idea",
-                    placeholder="I want something about discipline and hope.",
-                    lines=2,
-                )
-                with gr.Row():
-                    submit_text = gr.Button("Use this idea", variant="primary")
-                    surprise = gr.Button("Surprise me")
-                    create_now = gr.Button("Create now")
+        with gr.Group(visible=False, elem_id="ma-chat-panel") as chat_panel:
+            with gr.Row(elem_classes=["ma-topbar"]):
+                gr.Markdown("## Mythograph Atelier", elem_classes=["ma-brand"])
+                gr.Markdown(_format_runtime_status(), elem_classes=["ma-runtime"])
 
-                starter = gr.Radio(
-                    choices=[f"{title}: {text}" for title, text in STARTER_IDEAS],
-                    label="Starting points",
-                    value=None,
-                )
+            chatbot = gr.Chatbot(
+                value=[],
+                type="messages",
+                label="",
+                show_label=False,
+                height=430,
+                elem_id="ma-chatbot",
+                avatar_images=(None, None),
+                bubble_full_width=False,
+            )
+            progress = gr.Markdown(initial_turn.progress_label, elem_classes=["ma-progress"])
 
-                idea_cards = gr.CheckboxGroup(label="Idea cards", choices=[], visible=False)
-                style_cards = gr.Radio(label="Style cards", choices=[], visible=False)
-                symbol_cards = gr.Radio(label="Symbol cards", choices=[], visible=False)
-                contrast_cards = gr.Radio(label="Contrast", choices=[], visible=False)
-                visual_group = gr.Group(visible=False)
-                with visual_group:
+            with gr.Group(elem_id="ma-control-tray"):
+                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as choice_group:
+                    choice_cards = gr.Radio(label="", choices=[], show_label=False, elem_classes=["ma-card-control"])
+                    choice_submit = gr.Button("Choose", variant="primary")
+
+                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as multi_group:
+                    multi_cards = gr.CheckboxGroup(label="", choices=[], show_label=False, elem_classes=["ma-card-control"])
+                    multi_submit = gr.Button("Choose", variant="primary")
+
+                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as slider_group:
+                    gr.Markdown("### Tune the visual temperament")
                     minimal_rich = gr.Slider(0, 100, value=35, step=1, label="minimal to rich")
                     calm_intense = gr.Slider(0, 100, value=45, step=1, label="calm to intense")
-                    geometric_organic = gr.Slider(0, 100, value=35, step=1, label="geometric to organic")
-                    visual_submit = gr.Button("Save visual direction", variant="primary")
+                    geometric_organic = gr.Slider(0, 100, value=45, step=1, label="geometric to organic")
+                    slider_submit = gr.Button("Save taste", variant="primary")
 
-                with gr.Row():
-                    continue_button = gr.Button("Continue", variant="primary")
-                    reset_button = gr.Button("Reset")
+                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as swatch_group:
+                    swatch_picker = gr.Radio(label="", choices=[], show_label=False, elem_classes=["ma-swatch-control"])
+                    swatch_submit = gr.Button("Set color weather", variant="primary")
 
-                debug_reason = gr.Markdown("", visible=False)
-
-            with gr.Column(scale=5):
-                image_output = gr.Image(label="Painting", type="filepath", height=620)
-                gallery_label = gr.Markdown("", elem_classes=["ma-gallery-label"])
-                symbol_map = gr.Markdown("", elem_classes=["ma-symbol-table"])
-                regen = gr.Dropdown(
-                    choices=REGENERATION_OPTIONS,
-                    label="Regenerate",
-                    value=None,
-                    interactive=True,
-                    visible=False,
-                )
-                regen_button = gr.Button("Apply regeneration", visible=False)
-                image_prompt = gr.Textbox(label="Image prompt", lines=4, visible=False)
-                with gr.Accordion("Model activity", open=False):
-                    model_activity = gr.Textbox(
-                        label="Activity",
-                        lines=7,
-                        visible=False,
-                        interactive=False,
+                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as refine_group:
+                    refine_text = gr.Textbox(
+                        label="",
+                        placeholder="Add one sentence, or name a feeling, symbol, memory, or contradiction.",
+                        lines=2,
+                        show_label=False,
                     )
-                trace_file = gr.File(label="Trace export", visible=False)
-                trace_button = gr.Button("Download trace", visible=False)
+                    refine_submit = gr.Button("Add this", variant="primary")
 
-        submit_text.click(
-            fn=_submit_free_text,
-            inputs=[profile_state, custom_idea],
-            outputs=_flow_outputs(
-                profile_state,
-                action_state,
-                assistant_message,
-                idea_cards,
-                style_cards,
-                symbol_cards,
-                contrast_cards,
-                visual_group,
-                debug_reason,
-            ),
+                ready_button = gr.Button("Create artwork", variant="primary", visible=False, elem_id="ma-create-button")
+
+            with gr.Row(elem_id="ma-input-dock"):
+                chat_text = gr.Textbox(
+                    label="",
+                    placeholder="Add a thought, correction, symbol, or mood...",
+                    lines=1,
+                    max_lines=4,
+                    show_label=False,
+                    scale=5,
+                )
+                chat_submit = gr.Button("Send", variant="primary", scale=1, elem_classes=["ma-send"])
+                reset_button = gr.Button("Reset", scale=1, elem_classes=["ma-ghost"])
+
+            with gr.Group(visible=False, elem_id="ma-gallery") as gallery_group:
+                with gr.Row(elem_classes=["ma-gallery-grid"]):
+                    with gr.Column(scale=5):
+                        image_output = gr.Image(label="", type="filepath", height=620, show_label=False)
+                    with gr.Column(scale=4, elem_classes=["ma-result-copy"]):
+                        gallery_label = gr.Markdown("")
+                        symbol_map = gr.Markdown("", elem_classes=["ma-symbol-table"])
+                        regen = gr.Dropdown(
+                            choices=REGENERATION_OPTIONS,
+                            label="Regenerate",
+                            value=None,
+                            interactive=True,
+                            visible=False,
+                        )
+                        regen_button = gr.Button("Apply regeneration", visible=False)
+                        image_prompt = gr.Textbox(label="Image prompt", lines=4, visible=False)
+                        with gr.Accordion("Model activity", open=False):
+                            model_activity = gr.Textbox(
+                                label="Activity",
+                                lines=7,
+                                visible=False,
+                                interactive=False,
+                            )
+                        trace_file = gr.File(label="Trace export", visible=False)
+                        trace_button = gr.Button("Download trace", visible=False)
+
+        flow_outputs = [
+            profile_state,
+            chat_history_state,
+            turn_state,
+            start_panel,
+            chat_panel,
+            chatbot,
+            chat_text,
+            progress,
+            choice_group,
+            choice_cards,
+            multi_group,
+            multi_cards,
+            slider_group,
+            minimal_rich,
+            calm_intense,
+            geometric_organic,
+            swatch_group,
+            swatch_picker,
+            refine_group,
+            refine_text,
+            ready_button,
+            gallery_group,
+            image_output,
+            gallery_label,
+            symbol_map,
+            image_prompt,
+            regen,
+            regen_button,
+            trace_button,
+            trace_file,
+            recipe_state,
+            model_activity,
+        ]
+
+        start_submit.click(
+            fn=_submit_text,
+            inputs=[profile_state, chat_history_state, start_prompt],
+            outputs=flow_outputs,
         )
-        starter.change(
-            fn=_submit_starter,
-            inputs=[profile_state, starter],
-            outputs=_flow_outputs(
-                profile_state,
-                action_state,
-                assistant_message,
-                idea_cards,
-                style_cards,
-                symbol_cards,
-                contrast_cards,
-                visual_group,
-                debug_reason,
-            ),
+        start_prompt.submit(
+            fn=_submit_text,
+            inputs=[profile_state, chat_history_state, start_prompt],
+            outputs=flow_outputs,
         )
-        surprise.click(
-            fn=_surprise,
-            inputs=profile_state,
-            outputs=_flow_outputs(
-                profile_state,
-                action_state,
-                assistant_message,
-                idea_cards,
-                style_cards,
-                symbol_cards,
-                contrast_cards,
-                visual_group,
-                debug_reason,
-            ),
+        chat_submit.click(
+            fn=_submit_text,
+            inputs=[profile_state, chat_history_state, chat_text],
+            outputs=flow_outputs,
         )
-        continue_button.click(
-            fn=_continue,
-            inputs=[profile_state, action_state, idea_cards, style_cards, symbol_cards, contrast_cards],
-            outputs=_flow_outputs(
-                profile_state,
-                action_state,
-                assistant_message,
-                idea_cards,
-                style_cards,
-                symbol_cards,
-                contrast_cards,
-                visual_group,
-                debug_reason,
-            ),
+        chat_text.submit(
+            fn=_submit_text,
+            inputs=[profile_state, chat_history_state, chat_text],
+            outputs=flow_outputs,
         )
-        visual_submit.click(
-            fn=_submit_visuals,
-            inputs=[profile_state, minimal_rich, calm_intense, geometric_organic],
-            outputs=_flow_outputs(
-                profile_state,
-                action_state,
-                assistant_message,
-                idea_cards,
-                style_cards,
-                symbol_cards,
-                contrast_cards,
-                visual_group,
-                debug_reason,
-            ),
+        refine_submit.click(
+            fn=_submit_text,
+            inputs=[profile_state, chat_history_state, refine_text],
+            outputs=flow_outputs,
         )
-        create_now.click(
+
+        for button, (_title, text) in zip(starter_buttons, STARTER_CHIPS, strict=True):
+            button.click(
+                fn=lambda profile, history, starter_text=text: _submit_starter(profile, history, starter_text),
+                inputs=[profile_state, chat_history_state],
+                outputs=flow_outputs,
+            )
+
+        choice_submit.click(
+            fn=_submit_choice,
+            inputs=[profile_state, chat_history_state, choice_cards],
+            outputs=flow_outputs,
+        )
+        multi_submit.click(
+            fn=_submit_multi,
+            inputs=[profile_state, chat_history_state, multi_cards],
+            outputs=flow_outputs,
+        )
+        slider_submit.click(
+            fn=_submit_sliders,
+            inputs=[profile_state, chat_history_state, minimal_rich, calm_intense, geometric_organic],
+            outputs=flow_outputs,
+        )
+        swatch_submit.click(
+            fn=_submit_swatch,
+            inputs=[profile_state, chat_history_state, swatch_picker],
+            outputs=flow_outputs,
+        )
+        ready_button.click(
             fn=_generate,
-            inputs=[profile_state, recipe_state],
-            outputs=[
-                image_output,
-                gallery_label,
-                symbol_map,
-                image_prompt,
-                regen,
-                regen_button,
-                trace_button,
-                recipe_state,
-                model_activity,
-            ],
+            inputs=[profile_state, chat_history_state, recipe_state],
+            outputs=flow_outputs,
         )
         regen_button.click(
             fn=_regenerate,
-            inputs=[profile_state, recipe_state, regen],
-            outputs=[
-                image_output,
-                gallery_label,
-                symbol_map,
-                image_prompt,
-                regen,
-                regen_button,
-                trace_button,
-                recipe_state,
-                model_activity,
-            ],
+            inputs=[profile_state, chat_history_state, recipe_state, regen],
+            outputs=flow_outputs,
         )
-        trace_button.click(
-            fn=_export_trace,
-            outputs=trace_file,
-        )
-        reset_button.click(
-            fn=_reset,
-            outputs=[
-                profile_state,
-                action_state,
-                assistant_message,
-                idea_cards,
-                style_cards,
-                symbol_cards,
-                contrast_cards,
-                visual_group,
-                debug_reason,
-                image_output,
-                gallery_label,
-                symbol_map,
-                image_prompt,
-                regen,
-                regen_button,
-                trace_button,
-                trace_file,
-                recipe_state,
-                model_activity,
-            ],
-        )
+        trace_button.click(fn=_export_trace, outputs=trace_file)
+
+        reset_button.click(fn=_reset, outputs=flow_outputs)
+        reset_from_start.click(fn=_reset, outputs=flow_outputs)
 
     return demo
-
-
-def _flow_outputs(*components):
-    return list(components)
 
 
 def _format_runtime_status() -> str:
@@ -256,88 +261,172 @@ def _profile(data: dict) -> InterviewProfile:
     return InterviewProfile.model_validate(data)
 
 
-def _render_next(profile: InterviewProfile):
-    if MODEL_UI_DIRECTOR_ENABLED:
-        next_ui = choose_next_ui_with_model(profile)
-        director_source = "model_enabled"
-    else:
-        next_ui = choose_next_ui(profile)
-        director_source = "deterministic_fast_path"
-    log_event("next_ui", {"profile": profile.model_dump(), "next_ui": next_ui.model_dump()})
-    log_event("ui_director_mode", {"source": director_source})
+def _turn(data: dict) -> ConversationTurn:
+    return ConversationTurn.model_validate(data)
+
+
+def _message(role: str, content: str) -> dict[str, str]:
+    return {"role": role, "content": content}
+
+
+def _submit_text(profile_data: dict, history: list[dict], text: str):
+    clean = (text or "").strip()
+    if not clean:
+        return _reset()
+    profile, turn = advance_conversation(_profile(profile_data), user_message=clean)
+    chat = (history or []) + [_message("user", clean), _message("assistant", turn.assistant_message)]
+    return _render(profile, chat, turn)
+
+
+def _submit_starter(profile_data: dict, history: list[dict], text: str):
+    profile, turn = advance_conversation(_profile(profile_data), user_message=text)
+    chat = (history or []) + [_message("user", text), _message("assistant", turn.assistant_message)]
+    return _render(profile, chat, turn)
+
+
+def _submit_choice(profile_data: dict, history: list[dict], value: str | None):
+    response = ControlResponse(kind=ControlKind.CHOICE_CARDS, values=[value] if value else [])
+    return _submit_control(profile_data, history, response, value or "I am not sure yet.")
+
+
+def _submit_multi(profile_data: dict, history: list[dict], values: list[str] | None):
+    chosen = values or []
+    response = ControlResponse(kind=ControlKind.MULTI_CHOICE_CARDS, values=chosen)
+    return _submit_control(profile_data, history, response, " | ".join(chosen) if chosen else "I am not sure yet.")
+
+
+def _submit_sliders(
+    profile_data: dict,
+    history: list[dict],
+    minimal_rich: float,
+    calm_intense: float,
+    geometric_organic: float,
+):
+    sliders = {
+        "minimal_rich": minimal_rich,
+        "calm_intense": calm_intense,
+        "geometric_organic": geometric_organic,
+    }
+    response = ControlResponse(kind=ControlKind.SLIDER_GROUP, sliders=sliders)
+    summary = f"Density {minimal_rich:.0f}, energy {calm_intense:.0f}, shape {geometric_organic:.0f}."
+    return _submit_control(profile_data, history, response, summary)
+
+
+def _submit_swatch(profile_data: dict, history: list[dict], value: str | None):
+    response = ControlResponse(kind=ControlKind.SWATCH_PICKER, values=[value] if value else [])
+    return _submit_control(profile_data, history, response, value or "Surprise me.")
+
+
+def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):
+    profile, turn = advance_conversation(_profile(profile_data), control_response=response)
+    chat = (history or []) + [_message("user", user_summary), _message("assistant", turn.assistant_message)]
+    return _render(profile, chat, turn)
+
+
+def _render(
+    profile: InterviewProfile,
+    history: list[dict],
+    turn: ConversationTurn,
+    recipe_data: dict | None = None,
+    activity: str = "",
+    image_path: str | None = None,
+    recipe=None,
+    show_gallery: bool = False,
+):
+    control = turn.controls[0] if turn.controls else None
+    kind = control.kind if control else None
+    options = control.options if control else []
+
+    label = ""
+    symbols = ""
+    prompt = gr.update(visible=False)
+    regen = gr.update(visible=False)
+    regen_button = gr.update(visible=False)
+    trace_button = gr.update(visible=False)
+    model_activity = gr.update(value=activity, visible=bool(activity))
+    if recipe:
+        label = f"## {recipe.title}\n\n{recipe.friend_explanation}"
+        symbol_rows = "\n".join(f"| {symbol.visual} | {symbol.meaning} |" for symbol in recipe.symbols)
+        symbols = f"| Visual element | Meaning |\n|---|---|\n{symbol_rows}"
+        prompt = gr.update(value=recipe.image_prompt, visible=True)
+        regen = gr.update(visible=True)
+        regen_button = gr.update(visible=True)
+        trace_button = gr.update(visible=True)
+
     return [
         profile.model_dump(),
-        next_ui.next_action.value,
-        f"{next_ui.assistant_message}\n\n**{next_ui.question}**",
-        gr.update(choices=next_ui.options, value=[], visible=next_ui.next_action == UIAction.SHOW_IDEA_CARDS),
-        gr.update(choices=next_ui.options, value=None, visible=next_ui.next_action == UIAction.SHOW_STYLE_CARDS),
-        gr.update(choices=next_ui.options, value=None, visible=next_ui.next_action == UIAction.SHOW_SYMBOL_CARDS),
-        gr.update(choices=next_ui.options, value=None, visible=next_ui.next_action == UIAction.ASK_CONTRAST),
-        gr.update(visible=next_ui.next_action == UIAction.SHOW_VISUAL_SLIDERS),
-        f"`{next_ui.reason}`",
+        history,
+        turn.model_dump(),
+        gr.update(visible=False),
+        gr.update(visible=True),
+        history,
+        gr.update(value=""),
+        f"**{turn.progress_label}**",
+        gr.update(visible=kind == ControlKind.CHOICE_CARDS),
+        gr.update(choices=options, value=None),
+        gr.update(visible=kind == ControlKind.MULTI_CHOICE_CARDS),
+        gr.update(choices=options, value=[]),
+        gr.update(visible=kind == ControlKind.SLIDER_GROUP),
+        gr.update(value=_slider_value(turn, "minimal_rich", 35)),
+        gr.update(value=_slider_value(turn, "calm_intense", 45)),
+        gr.update(value=_slider_value(turn, "geometric_organic", 45)),
+        gr.update(visible=kind == ControlKind.SWATCH_PICKER),
+        gr.update(choices=options, value=None),
+        gr.update(visible=kind == ControlKind.TEXT_REFINEMENT),
+        gr.update(value=""),
+        gr.update(visible=turn.is_ready),
+        gr.update(visible=show_gallery),
+        image_path,
+        label,
+        symbols,
+        prompt,
+        regen,
+        regen_button,
+        trace_button,
+        gr.update(value=None, visible=False),
+        recipe_data,
+        model_activity,
     ]
 
 
-def _submit_free_text(data: dict, text: str):
-    profile = apply_answer(_profile(data), UIAction.ASK_FREE_TEXT, text)
-    return _render_next(profile)
-
-
-def _submit_starter(data: dict, selected: str | None):
-    text = selected.split(": ", 1)[1] if selected and ": " in selected else (selected or "")
-    profile = apply_answer(_profile(data), UIAction.SHOW_IDEA_CARDS, text)
-    return _render_next(profile)
-
-
-def _surprise(data: dict):
-    profile = start_with_surprise(_profile(data))
-    return _render_next(profile)
-
-
-def _continue(data: dict, action: str, ideas: list[str], style: str | None, symbol: str | None, contrast: str | None):
-    selected = ""
-    if action == UIAction.SHOW_IDEA_CARDS and ideas:
-        selected = " | ".join(ideas)
-    elif action == UIAction.SHOW_STYLE_CARDS:
-        selected = style or ""
-    elif action == UIAction.SHOW_SYMBOL_CARDS:
-        selected = symbol or ""
-    elif action == UIAction.ASK_CONTRAST:
-        selected = contrast or ""
-    profile = apply_answer(_profile(data), action, selected)
-    return _render_next(profile)
-
-
-def _submit_visuals(data: dict, minimal_rich: float, calm_intense: float, geometric_organic: float):
-    profile = apply_answer(
-        _profile(data),
-        UIAction.SHOW_VISUAL_SLIDERS,
-        "visual preferences",
-        {
-            "minimal_rich": minimal_rich,
-            "calm_intense": calm_intense,
-            "geometric_organic": geometric_organic,
-        },
-    )
-    return _render_next(profile)
+def _slider_value(turn: ConversationTurn, key: str, default: int) -> int:
+    if not turn.controls:
+        return default
+    for slider in turn.controls[0].sliders:
+        if slider.key == key:
+            return slider.value
+    return default
 
 
 @spaces.GPU(duration=300)
-def _generate(data: dict, recipe_data: dict | None):
-    profile = _profile(data)
-    yield _pending_outputs(
+def _generate(profile_data: dict, history: list[dict], recipe_data: dict | None):
+    profile = _profile(profile_data)
+    working_history = (history or []) + [_message("assistant", "I am preparing the art recipe and warming the image model.")]
+    turn = ConversationTurn(
+        assistant_message="I am preparing the art recipe and warming the image model.",
+        progress_label="Painting: art director is working",
+        reason="generation started",
+        is_ready=False,
+    )
+    yield _render(
+        profile,
+        working_history,
+        turn,
+        recipe_data,
         "Starting generation...\n"
         f"Runtime mode: {runtime_status()['mode']}\n"
         "Calling the art director. The first llama.cpp call may include model download/load time.",
-        recipe_data,
     )
+
     recipe = build_art_recipe_with_model(profile)
-    yield _pending_outputs(
-        "Art recipe ready.\n"
-        f"Title: {recipe.title}\n"
-        "Rendering painting now.",
+    yield _render(
+        profile,
+        working_history,
+        turn,
         recipe.model_dump(),
+        f"Art recipe ready.\nTitle: {recipe.title}\nRendering painting now.",
     )
+
     image_result = ImageClient().generate(recipe)
     log_event(
         "image_generation",
@@ -349,29 +438,39 @@ def _generate(data: dict, recipe_data: dict | None):
         },
     )
     log_event("generate", {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": image_result.path})
-    yield _gallery_outputs(
+    final_history = working_history + [_message("assistant", f"Done. The piece is called **{recipe.title}**.")]
+    yield _render(
+        profile,
+        final_history,
+        turn,
+        recipe.model_dump(),
+        f"Generation complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
         image_result.path,
         recipe,
-        f"Generation complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
+        True,
     )
 
 
 @spaces.GPU(duration=300)
-def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
-    profile = _profile(data)
-    yield _pending_outputs(
+def _regenerate(profile_data: dict, history: list[dict], recipe_data: dict | None, instruction: str | None):
+    profile = _profile(profile_data)
+    working_history = (history or []) + [_message("assistant", "I am revising the recipe and repainting it.")]
+    turn = ConversationTurn(
+        assistant_message="I am revising the recipe and repainting it.",
+        progress_label="Painting: regeneration is working",
+        reason="regeneration started",
+        is_ready=False,
+    )
+    yield _render(
+        profile,
+        working_history,
+        turn,
+        recipe_data,
         "Starting regeneration...\n"
         f"Instruction: {instruction or 'Surprise me'}\n"
         f"Runtime mode: {runtime_status()['mode']}",
-        recipe_data,
     )
     recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
-    yield _pending_outputs(
-        "Updated recipe ready.\n"
-        f"Title: {recipe.title}\n"
-        "Rendering painting now.",
-        recipe.model_dump(),
-    )
     image_result = ImageClient().generate(recipe)
     log_event(
         "image_generation",
@@ -391,42 +490,17 @@ def _regenerate(data: dict, recipe_data: dict | None, instruction: str | None):
             "image_path": image_result.path,
         },
     )
-    yield _gallery_outputs(
+    final_history = working_history + [_message("assistant", f"I repainted it as **{recipe.title}**.")]
+    yield _render(
+        profile,
+        final_history,
+        turn,
+        recipe.model_dump(),
+        f"Regeneration complete.\nImage source: {image_result.source}",
         image_result.path,
         recipe,
-        f"Regeneration complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
+        True,
     )
-
-
-def _pending_outputs(activity: str, recipe_data: dict | None):
-    return [
-        None,
-        "### Working...",
-        "",
-        gr.update(visible=False),
-        gr.update(visible=False),
-        gr.update(visible=False),
-        gr.update(visible=False),
-        recipe_data,
-        gr.update(value=activity, visible=True),
-    ]
-
-
-def _gallery_outputs(path: str, recipe, activity: str):
-    label = f"## {recipe.title}\n\n{recipe.friend_explanation}"
-    symbol_rows = "\n".join(f"| {symbol.visual} | {symbol.meaning} |" for symbol in recipe.symbols)
-    symbols = f"| Visual element | Meaning |\n|---|---|\n{symbol_rows}"
-    return [
-        path,
-        label,
-        symbols,
-        gr.update(value=recipe.image_prompt, visible=True),
-        gr.update(visible=True),
-        gr.update(visible=True),
-        gr.update(visible=True),
-        recipe.model_dump(),
-        gr.update(value=activity, visible=True),
-    ]
 
 
 def _export_trace():
@@ -435,16 +509,30 @@ def _export_trace():
 
 def _reset():
     profile = new_profile()
+    turn = start_session()
     return [
         profile.model_dump(),
-        UIAction.ASK_FREE_TEXT.value,
-        "Choose a starting idea, write your own, or ask the atelier to surprise you.",
-        gr.update(choices=[], value=[], visible=False),
-        gr.update(choices=[], value=None, visible=False),
-        gr.update(choices=[], value=None, visible=False),
-        gr.update(choices=[], value=None, visible=False),
+        [],
+        turn.model_dump(),
+        gr.update(visible=True),
         gr.update(visible=False),
-        "",
+        [],
+        gr.update(value=""),
+        f"**{turn.progress_label}**",
+        gr.update(visible=False),
+        gr.update(choices=[], value=None),
+        gr.update(visible=False),
+        gr.update(choices=[], value=[]),
+        gr.update(visible=False),
+        gr.update(value=35),
+        gr.update(value=45),
+        gr.update(value=45),
+        gr.update(visible=False),
+        gr.update(choices=[], value=None),
+        gr.update(visible=False),
+        gr.update(value=""),
+        gr.update(visible=False),
+        gr.update(visible=False),
         None,
         "",
         "",

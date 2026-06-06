@@ -19,12 +19,13 @@ Mythograph Atelier is a Gradio app for Hugging Face's Build Small Hackathon. It 
 
 ## Current MVP
 
-- Controlled dynamic interview actions: idea cards, visual sliders, style cards, symbol cards, contrast questions, and surprise steps.
-- Hidden objective scoring to decide what the interface should ask next.
-- Offline procedural artwork generation with Pillow as a reliable fallback.
+- Chat-first dynamic interview with a centered starting prompt, starter chips, assistant messages, and controls that appear only when needed.
+- Hybrid conversation director: deterministic routing for fast turns, llama.cpp/Nemotron for the final art recipe.
+- Dynamic control tray for choice cards, multi-choice cards, visual sliders, palette mood, text refinement, and create readiness.
+- FLUX.2-klein image generation with Pillow as a reliable fallback.
 - Final gallery card with painting, title, friend explanation, symbol map, image prompt, and regeneration controls.
-- JSONL trace logging for demo sessions.
-- Custom Gradio CSS for a more atelier-like interface.
+- JSONL trace logging for conversation turns, control responses, model calls, image generation, and demo sessions.
+- Custom Gradio shell designed for the Off-Brand badge path.
 
 ## Run Locally
 
