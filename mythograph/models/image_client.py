@@ -1,7 +1,16 @@
 import time
 
 from mythograph.config import IMAGE_MODE
-from mythograph.config import IMAGE_DTYPE, IMAGE_HEIGHT, IMAGE_MODEL_ID, IMAGE_SEED, IMAGE_STEPS, IMAGE_WIDTH
+from mythograph.config import (
+    IMAGE_CPU_OFFLOAD,
+    IMAGE_DTYPE,
+    IMAGE_GUIDANCE_SCALE,
+    IMAGE_HEIGHT,
+    IMAGE_MODEL_ID,
+    IMAGE_SEED,
+    IMAGE_STEPS,
+    IMAGE_WIDTH,
+)
 from mythograph.config import OUTPUT_DIR
 from mythograph.schemas.art_recipe import ArtRecipe
 from mythograph.services.generation import ImageGenerationResult, generate_fallback_image
@@ -30,6 +39,7 @@ class ImageClient:
             pipe = self._load_flux_pipeline()
             image_kwargs = {
                 "prompt": recipe.image_prompt,
+                "guidance_scale": IMAGE_GUIDANCE_SCALE,
                 "num_inference_steps": IMAGE_STEPS,
                 "width": IMAGE_WIDTH,
                 "height": IMAGE_HEIGHT,
@@ -63,15 +73,18 @@ class ImageClient:
 
         try:
             import torch
-            from diffusers import DiffusionPipeline
+            from diffusers import Flux2KleinPipeline
         except ImportError as exc:
             raise RuntimeError("Install requirements-image.txt to enable MYTHOGRAPH_IMAGE_MODE=flux.") from exc
 
-        cls._flux_pipe = DiffusionPipeline.from_pretrained(
+        cls._flux_pipe = Flux2KleinPipeline.from_pretrained(
             IMAGE_MODEL_ID,
-            dtype=_torch_dtype(torch),
-            device_map="cuda",
+            torch_dtype=_torch_dtype(torch),
         )
+        if IMAGE_CPU_OFFLOAD:
+            cls._flux_pipe.enable_model_cpu_offload()
+        else:
+            cls._flux_pipe.to("cuda")
         return cls._flux_pipe
 
     @staticmethod

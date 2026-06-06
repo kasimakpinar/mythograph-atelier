@@ -3,7 +3,16 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mythograph.config import IMAGE_DTYPE, IMAGE_HEIGHT, IMAGE_MODE, IMAGE_MODEL_ID, IMAGE_STEPS, IMAGE_WIDTH
+from mythograph.config import (
+    IMAGE_CPU_OFFLOAD,
+    IMAGE_DTYPE,
+    IMAGE_GUIDANCE_SCALE,
+    IMAGE_HEIGHT,
+    IMAGE_MODE,
+    IMAGE_MODEL_ID,
+    IMAGE_STEPS,
+    IMAGE_WIDTH,
+)
 from mythograph.models.image_client import ImageClient
 
 
@@ -24,6 +33,8 @@ def main() -> None:
     print(f"{IMAGE_WIDTH}x{IMAGE_HEIGHT}")
     print(IMAGE_STEPS)
     print(IMAGE_DTYPE)
+    print(IMAGE_GUIDANCE_SCALE)
+    print(IMAGE_CPU_OFFLOAD)
     print(ImageClient._run_flux_pipeline(FakeNoNegativePromptPipeline(), {"prompt": "x"}, "avoid text").images[0])
 
 
