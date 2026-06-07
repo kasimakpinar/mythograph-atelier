@@ -4,13 +4,13 @@ pydantic>=2.7
 numpy>=1.26
 spaces>=0.40.0
 
-# llama.cpp proof path. This installs the CUDA-enabled Python runtime but does
-# not download or load a GGUF model unless MYTHOGRAPH_LLM_MODE=llamacpp is set.
+# llama.cpp text path. The app runs Nemotron GGUF locally through this runtime.
+# Defaults use CPU/RAM with n_gpu_layers=0 for the no-API badge path.
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 llama-cpp-python>=0.3.16
 huggingface-hub>=0.34.0
 
-# Image-model test path. These enable MYTHOGRAPH_IMAGE_MODE=flux.
+# FLUX.2 Klein image path. The Gradio image callback is the ZeroGPU workload.
 diffusers>=0.36.0
 torch>=2.9.0
 accelerate>=1.12.0

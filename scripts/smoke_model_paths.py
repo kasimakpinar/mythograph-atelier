@@ -5,12 +5,13 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mythograph.models.llm_client import LLMResponse
+from mythograph.config import LLM_RECIPE_MAX_TOKENS
 from mythograph.services.art_recipe import build_art_recipe_with_model
 from mythograph.services.interview import choose_next_ui_with_model, new_profile
 
 
 class FakeClient:
-    def complete_json(self, system_prompt, user_payload):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None):
         if "Choose the next UI action" in system_prompt:
             return LLMResponse(
                 content=json.dumps(
@@ -24,6 +25,7 @@ class FakeClient:
                 ),
                 source="local",
             )
+        assert max_tokens == LLM_RECIPE_MAX_TOKENS
         return LLMResponse(
             content=json.dumps(
                 {

@@ -16,6 +16,7 @@ Required JSON fields:
 - friend_explanation: string
 
 Rules:
+- Be concise. Do not write long essays.
 - Make abstract art, not a literal scene.
 - Use shapes, fields, voids, lines, pressure, texture, rhythm, and contrast.
 - Preserve the user's own words and emotional intent in main_idea and friend_explanation, but transform them into concise art language.

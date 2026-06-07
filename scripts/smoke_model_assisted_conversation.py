@@ -10,7 +10,11 @@ import mythograph.services.conversation as conversation
 
 
 class GoodClient:
-    def complete_json(self, system_prompt, user_payload):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None):
+        assert max_tokens == conversation.LLM_CHAT_MAX_TOKENS
+        assert "atelier_state" in user_payload
+        assert "chat_history" not in user_payload
+        assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
         return LLMResponse(
             content=json.dumps(
                 {
@@ -29,13 +33,13 @@ class GoodClient:
                     ],
                 }
             ),
-            source="modal",
+            source="llamacpp",
         )
 
 
 class BadClient:
-    def complete_json(self, system_prompt, user_payload):
-        return LLMResponse(content="not json", source="modal")
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None):
+        return LLMResponse(content="not json", source="llamacpp")
 
 
 def main() -> None:
@@ -47,11 +51,11 @@ def main() -> None:
         profile = conversation.update_scores(profile)
         fallback = conversation.choose_conversation_turn(profile)
 
-        good = conversation.choose_conversation_turn_with_model(profile, fallback, [], GoodClient())
+        good = conversation.choose_conversation_turn_with_model(profile, fallback, GoodClient())
         assert good.controls[0].kind == ControlKind.SWATCH_PICKER
         assert good.controls[0].options[0] == "ash, gold, pale blue"
 
-        bad = conversation.choose_conversation_turn_with_model(profile, fallback, [], BadClient())
+        bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
         assert bad.model_dump() == fallback.model_dump()
     finally:
         conversation.CONVERSATION_MODE = original_mode

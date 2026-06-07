@@ -3,7 +3,7 @@ import spaces
 
 from mythograph.config import APP_TITLE, ROOT_DIR
 from mythograph.models.image_client import ImageClient
-from mythograph.models.llm_client import runtime_status
+from mythograph.models.llm_client import preload_llamacpp_if_configured, runtime_status
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn
 from mythograph.services.art_recipe import build_art_recipe_with_model
@@ -18,12 +18,24 @@ STARTER_CHIPS = STARTER_IDEAS[:3]
 def build_demo() -> gr.Blocks:
     css = (ROOT_DIR / "mythograph" / "ui" / "styles.css").read_text(encoding="utf-8")
     initial_turn = start_session()
+    preload_result = preload_llamacpp_if_configured()
+    if preload_result:
+        log_event(
+            "llamacpp_preload",
+            {
+                "source": preload_result.source,
+                "error": preload_result.error,
+                "runtime": runtime_status(),
+            },
+        )
 
     with gr.Blocks(title=APP_TITLE, css=css, elem_id="ma-shell", theme=gr.themes.Base()) as demo:
         profile_state = gr.State(new_profile().model_dump())
         chat_history_state = gr.State([])
         turn_state = gr.State(initial_turn.model_dump())
         recipe_state = gr.State(None)
+        generate_action_state = gr.State("generate")
+        regenerate_action_state = gr.State("regenerate")
 
         with gr.Group(elem_id="ma-start-panel") as start_panel:
             gr.HTML(
@@ -227,14 +239,24 @@ def build_demo() -> gr.Blocks:
             inputs=[profile_state, chat_history_state, swatch_picker],
             outputs=flow_outputs,
         )
-        ready_button.click(
-            fn=_generate,
+        ready_event = ready_button.click(
+            fn=_prepare_generation,
             inputs=[profile_state, chat_history_state, recipe_state],
             outputs=flow_outputs,
         )
-        regen_button.click(
-            fn=_regenerate,
+        ready_event.then(
+            fn=_render_prepared_image,
+            inputs=[profile_state, chat_history_state, recipe_state, generate_action_state],
+            outputs=flow_outputs,
+        )
+        regen_event = regen_button.click(
+            fn=_prepare_regeneration,
             inputs=[profile_state, chat_history_state, recipe_state, regen],
+            outputs=flow_outputs,
+        )
+        regen_event.then(
+            fn=_render_prepared_image,
+            inputs=[profile_state, chat_history_state, recipe_state, regenerate_action_state],
             outputs=flow_outputs,
         )
         trace_button.click(fn=_export_trace, outputs=trace_file)
@@ -249,7 +271,10 @@ def _format_runtime_status() -> str:
     status = runtime_status()
     mode = status["mode"]
     if mode == "llamacpp":
-        model = f'{status["llamacpp_repo_id"]} / {status["llamacpp_filename"]}'
+        model = (
+            f'{status["llamacpp_repo_id"]} / {status["llamacpp_filename"]} '
+            f'(CPU threads: {status["llamacpp_n_threads"]}, preload: {status["llamacpp_preload"]})'
+        )
     elif mode == "local":
         model = f'{status["openai_compatible_model"]} at {status["openai_compatible_base_url"]}'
     else:
@@ -274,14 +299,14 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
     if not clean:
         return _reset()
     director_history = (history or []) + [_message("user", clean)]
-    profile, turn = advance_conversation(_profile(profile_data), user_message=clean, chat_history=director_history)
+    profile, turn = advance_conversation(_profile(profile_data), user_message=clean)
     chat = director_history + [_message("assistant", turn.assistant_message)]
     return _render(profile, chat, turn)
 
 
 def _submit_starter(profile_data: dict, history: list[dict], text: str):
     director_history = (history or []) + [_message("user", text)]
-    profile, turn = advance_conversation(_profile(profile_data), user_message=text, chat_history=director_history)
+    profile, turn = advance_conversation(_profile(profile_data), user_message=text)
     chat = director_history + [_message("assistant", turn.assistant_message)]
     return _render(profile, chat, turn)
 
@@ -321,7 +346,7 @@ def _submit_swatch(profile_data: dict, history: list[dict], value: str | None):
 
 def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):
     director_history = (history or []) + [_message("user", user_summary)]
-    profile, turn = advance_conversation(_profile(profile_data), control_response=response, chat_history=director_history)
+    profile, turn = advance_conversation(_profile(profile_data), control_response=response)
     chat = director_history + [_message("assistant", turn.assistant_message)]
     return _render(profile, chat, turn)
 
@@ -401,79 +426,69 @@ def _slider_value(turn: ConversationTurn, key: str, default: int) -> int:
     return default
 
 
-@spaces.GPU(duration=300)
-def _generate(profile_data: dict, history: list[dict], recipe_data: dict | None):
+def _prepare_generation(profile_data: dict, history: list[dict], recipe_data: dict | None):
     profile = _profile(profile_data)
-    working_history = (history or []) + [_message("assistant", "I am preparing the art recipe and warming the image model.")]
+    working_history = (history or []) + [_message("assistant", "I am preparing the art recipe on the CPU text model.")]
     turn = ConversationTurn(
-        assistant_message="I am preparing the art recipe and warming the image model.",
+        assistant_message="I am preparing the art recipe on the CPU text model.",
         progress_label="Painting: art director is working",
         reason="generation started",
         is_ready=False,
     )
-    yield _render(
-        profile,
-        working_history,
-        turn,
-        recipe_data,
-        "Starting generation...\n"
-        f"Runtime mode: {runtime_status()['mode']}\n"
-        "Calling the art director. The first llama.cpp call may include model download/load time.",
-    )
-
     recipe = build_art_recipe_with_model(profile)
-    yield _render(
+    return _render(
         profile,
         working_history,
         turn,
         recipe.model_dump(),
-        f"Art recipe ready.\nTitle: {recipe.title}\nRendering painting now.",
+        "CPU recipe ready.\n"
+        f"Runtime mode: {runtime_status()['mode']}\n"
+        f"Title: {recipe.title}\n"
+        "Requesting ZeroGPU for FLUX rendering now.",
     )
 
-    image_result = ImageClient().generate(recipe)
-    log_event(
-        "image_generation",
-        {
-            "source": image_result.source,
-            "elapsed_seconds": image_result.elapsed_seconds,
-            "error": image_result.error,
-            "image_path": image_result.path,
-        },
+
+def _prepare_regeneration(profile_data: dict, history: list[dict], recipe_data: dict | None, instruction: str | None):
+    profile = _profile(profile_data)
+    working_history = (history or []) + [_message("assistant", "I am revising the recipe on the CPU text model.")]
+    turn = ConversationTurn(
+        assistant_message="I am revising the recipe on the CPU text model.",
+        progress_label="Painting: art director is revising",
+        reason="regeneration started",
+        is_ready=False,
     )
-    log_event("generate", {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": image_result.path})
-    final_history = working_history + [_message("assistant", f"Done. The piece is called **{recipe.title}**.")]
-    yield _render(
+    recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
+    return _render(
         profile,
-        final_history,
+        working_history,
         turn,
         recipe.model_dump(),
-        f"Generation complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
-        image_result.path,
-        recipe,
-        True,
+        "CPU recipe revision ready.\n"
+        f"Instruction: {instruction or 'Surprise me'}\n"
+        f"Title: {recipe.title}\n"
+        "Requesting ZeroGPU for FLUX rendering now.",
     )
 
 
 @spaces.GPU(duration=300)
-def _regenerate(profile_data: dict, history: list[dict], recipe_data: dict | None, instruction: str | None):
+def _render_prepared_image(
+    profile_data: dict,
+    history: list[dict],
+    recipe_data: dict | None,
+    action: str = "generate",
+):
     profile = _profile(profile_data)
-    working_history = (history or []) + [_message("assistant", "I am revising the recipe and repainting it.")]
-    turn = ConversationTurn(
-        assistant_message="I am revising the recipe and repainting it.",
-        progress_label="Painting: regeneration is working",
-        reason="regeneration started",
-        is_ready=False,
-    )
-    yield _render(
-        profile,
-        working_history,
-        turn,
-        recipe_data,
-        "Starting regeneration...\n"
-        f"Instruction: {instruction or 'Surprise me'}\n"
-        f"Runtime mode: {runtime_status()['mode']}",
-    )
-    recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
+    if not recipe_data:
+        return _render(
+            profile,
+            history or [],
+            start_session(),
+            recipe_data,
+            "No recipe was prepared; please continue the conversation and try again.",
+        )
+    from mythograph.schemas.art_recipe import ArtRecipe
+
+    recipe = ArtRecipe.model_validate(recipe_data)
     image_result = ImageClient().generate(recipe)
     log_event(
         "image_generation",
@@ -484,22 +499,20 @@ def _regenerate(profile_data: dict, history: list[dict], recipe_data: dict | Non
             "image_path": image_result.path,
         },
     )
-    log_event(
-        "regenerate",
-        {
-            "profile": profile.model_dump(),
-            "instruction": instruction,
-            "recipe": recipe.model_dump(),
-            "image_path": image_result.path,
-        },
-    )
-    final_history = working_history + [_message("assistant", f"I repainted it as **{recipe.title}**.")]
-    yield _render(
+    event_name = "regenerate" if action == "regenerate" else "generate"
+    log_event(event_name, {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": image_result.path})
+    final_history = (history or []) + [_message("assistant", f"Done. The piece is called **{recipe.title}**.")]
+    return _render(
         profile,
         final_history,
-        turn,
+        ConversationTurn(
+            assistant_message=f"Done. The piece is called {recipe.title}.",
+            progress_label="Complete: image rendered",
+            reason="image generation complete",
+            is_ready=False,
+        ),
         recipe.model_dump(),
-        f"Regeneration complete.\nImage source: {image_result.source}",
+        f"Generation complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
         image_result.path,
         recipe,
         True,

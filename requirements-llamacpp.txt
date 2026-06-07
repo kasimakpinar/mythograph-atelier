@@ -1,8 +1,8 @@
 # Optional llama.cpp runtime dependencies reference.
 #
-# The Space proof path now includes these in requirements.txt using the CPU
-# wheel index so HF can import llama_cpp when MYTHOGRAPH_LLM_MODE=llamacpp.
-# Keep this file as the badge/runbook reference for alternate CUDA wheels.
+# The Space path now includes these in requirements.txt so HF can import
+# llama_cpp for the no-API text model. Keep this file as a badge/runbook
+# reference for alternate llama.cpp wheels.
 #
 # CUDA wheel for GPU llama.cpp testing on Hugging Face Spaces.
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124

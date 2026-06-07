@@ -2,7 +2,7 @@ import time
 
 from mythograph.schemas.art_recipe import ArtRecipe, Symbol
 from mythograph.schemas.profile import InterviewProfile
-from mythograph.config import ROOT_DIR
+from mythograph.config import LLM_RECIPE_MAX_TOKENS, ROOT_DIR
 from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.services.trace_logger import log_event
 
@@ -104,6 +104,7 @@ def build_art_recipe_with_model(
             "regeneration_instruction": regeneration_instruction,
             "fallback_recipe": fallback.model_dump(),
         },
+        max_tokens=LLM_RECIPE_MAX_TOKENS,
     )
     elapsed_seconds = round(time.perf_counter() - started, 3)
 

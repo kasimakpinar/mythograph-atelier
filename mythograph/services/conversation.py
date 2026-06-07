@@ -1,6 +1,6 @@
 import time
 
-from mythograph.config import CONVERSATION_MODE, ROOT_DIR
+from mythograph.config import CONVERSATION_MODE, LLM_CHAT_MAX_TOKENS, ROOT_DIR
 from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn, DynamicControl, SliderSpec
@@ -43,7 +43,6 @@ def advance_conversation(
     profile: InterviewProfile | None = None,
     user_message: str = "",
     control_response: ControlResponse | None = None,
-    chat_history: list[dict[str, str]] | None = None,
     client: LLMClient | None = None,
 ) -> tuple[InterviewProfile, ConversationTurn]:
     profile = profile or new_profile()
@@ -57,7 +56,7 @@ def advance_conversation(
 
     profile = update_scores(profile)
     fallback_turn = choose_conversation_turn(profile)
-    turn = choose_conversation_turn_with_model(profile, fallback_turn, chat_history or [], client)
+    turn = choose_conversation_turn_with_model(profile, fallback_turn, client)
     log_event(
         "conversation_turn",
         {
@@ -79,7 +78,6 @@ def advance_conversation(
 def choose_conversation_turn_with_model(
     profile: InterviewProfile,
     fallback_turn: ConversationTurn,
-    chat_history: list[dict[str, str]] | None = None,
     client: LLMClient | None = None,
 ) -> ConversationTurn:
     if CONVERSATION_MODE != "model_assisted":
@@ -93,8 +91,7 @@ def choose_conversation_turn_with_model(
     response = llm.complete_json(
         system_prompt,
         {
-            "profile": profile.model_dump(),
-            "chat_history": (chat_history or [])[-10:],
+            "atelier_state": build_atelier_state(profile),
             "fallback_turn": fallback_turn.model_dump(),
             "allowed_control_kinds": [kind.value for kind in ControlKind],
             "available_option_sets": {
@@ -105,6 +102,7 @@ def choose_conversation_turn_with_model(
                 "palette_moods": PALETTE_OPTIONS,
             },
         },
+        max_tokens=LLM_CHAT_MAX_TOKENS,
     )
     elapsed_seconds = round(time.perf_counter() - started, 3)
 
@@ -118,6 +116,7 @@ def choose_conversation_turn_with_model(
                 "transport_error": response.error,
                 "raw_content": response.content,
                 "used_fallback": True,
+                "atelier_state": build_atelier_state(profile),
                 "turn": fallback_turn.model_dump(),
             },
         )
@@ -136,6 +135,7 @@ def choose_conversation_turn_with_model(
                 "transport_error": response.error,
                 "raw_content": response.content,
                 "used_fallback": True,
+                "atelier_state": build_atelier_state(profile),
                 "turn": fallback_turn.model_dump(),
             },
         )
@@ -149,10 +149,34 @@ def choose_conversation_turn_with_model(
             "transport_error": response.error,
             "raw_content": response.content,
             "used_fallback": False,
+            "atelier_state": build_atelier_state(profile),
             "turn": candidate.model_dump(),
         },
     )
     return candidate
+
+
+def build_atelier_state(profile: InterviewProfile) -> dict:
+    visual_preferences = dict(profile.visual_preferences)
+    answers = profile.ideas + profile.styles + profile.symbols + profile.contrasts + profile.free_notes
+    return {
+        "mood": _first_nonempty(profile.contrasts + profile.styles),
+        "main_idea": _first_nonempty(profile.ideas),
+        "main_symbol": _first_nonempty(profile.symbols),
+        "palette_mood": visual_preferences.get("palette_mood", ""),
+        "visual_style": _first_nonempty(profile.styles),
+        "visual_preferences": visual_preferences,
+        "answers_so_far": [answer[:180] for answer in answers[-6:]],
+        "scores": profile.scores.model_dump(),
+        "turn_count": profile.turn_count,
+    }
+
+
+def _first_nonempty(items: list[str]) -> str:
+    for item in items:
+        if item:
+            return item
+    return ""
 
 
 def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: ConversationTurn) -> ConversationTurn:
