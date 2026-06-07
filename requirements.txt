@@ -8,7 +8,7 @@ spaces>=0.40.0
 # Defaults use CUDA llama.cpp on ZeroGPU for the no-API badge path.
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 --only-binary llama-cpp-python
-llama-cpp-python==0.3.16
+llama-cpp-python==0.3.22
 huggingface-hub>=0.34.0
 
 # FLUX.2 Klein image path. The Gradio image callback is the ZeroGPU workload.

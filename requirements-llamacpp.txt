@@ -7,5 +7,5 @@
 # CUDA wheel for the no-API text model path on Hugging Face Spaces.
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 --only-binary llama-cpp-python
-llama-cpp-python==0.3.16
+llama-cpp-python==0.3.22
 huggingface-hub>=0.34.0
