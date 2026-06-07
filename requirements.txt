@@ -17,3 +17,7 @@ torch>=2.9.0,<2.12
 accelerate>=1.12.0
 transformers>=4.57.0
 safetensors>=0.7.0
+
+# CUDA shared libraries needed by the llama.cpp CUDA wheel on Spaces.
+nvidia-cuda-runtime-cu12>=12.4
+nvidia-cublas-cu12>=12.4
