@@ -3,6 +3,8 @@ import os
 import site
 import sys
 import ctypes
+import gc
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ from mythograph.config import (
     LLAMACPP_PRELOAD,
     LLAMACPP_RECIPE_ENABLED,
     LLAMACPP_REPO_ID,
+    LLAMACPP_UNLOAD_AFTER_CALL,
     LLAMACPP_VERBOSE,
     LLM_BASE_URL,
     LLM_CHAT_MAX_TOKENS,
@@ -36,6 +39,7 @@ class LLMResponse:
     source: str
     raw: dict[str, Any] | None = None
     error: str | None = None
+    elapsed_seconds: float = 0
 
 
 class LLMClient:
@@ -61,6 +65,7 @@ class LLMClient:
         user_payload: dict[str, Any],
         max_tokens: int | None = None,
         temperature: float | None = None,
+        response_format: dict[str, str] | None = None,
     ) -> LLMResponse:
         if self.mode == "mock":
             return LLMResponse(content="", source="mock")
@@ -70,8 +75,10 @@ class LLMClient:
                 user_payload,
                 max_tokens=max_tokens or self.max_tokens,
                 temperature=temperature if temperature is not None else self.temperature,
+                response_format=response_format,
             )
 
+        started = time.perf_counter()
         payload = {
             "model": self.model,
             "messages": [
@@ -81,6 +88,8 @@ class LLMClient:
             "temperature": temperature if temperature is not None else self.temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }
+        if response_format:
+            payload["response_format"] = response_format
 
         headers = {"Content-Type": "application/json"}
         request = urllib.request.Request(
@@ -93,9 +102,19 @@ class LLMClient:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = json.loads(response.read().decode("utf-8"))
             content = raw["choices"][0]["message"]["content"]
-            return LLMResponse(content=content, source="local", raw=raw)
+            return LLMResponse(
+                content=content,
+                source="local",
+                raw=raw,
+                elapsed_seconds=round(time.perf_counter() - started, 3),
+            )
         except (KeyError, json.JSONDecodeError, TimeoutError, urllib.error.URLError, OSError) as exc:
-            return LLMResponse(content="", source="fallback", error=str(exc))
+            return LLMResponse(
+                content="",
+                source="fallback",
+                error=str(exc),
+                elapsed_seconds=round(time.perf_counter() - started, 3),
+            )
 
 
 class LlamaCppClient:
@@ -107,21 +126,150 @@ class LlamaCppClient:
         user_payload: dict[str, Any],
         max_tokens: int = LLM_CHAT_MAX_TOKENS,
         temperature: float = LLM_TEMPERATURE,
+        response_format: dict[str, str] | None = None,
     ) -> LLMResponse:
+        started = time.perf_counter()
         try:
             llm = self._load()
-            raw = llm.create_chat_completion(
-                messages=[
+            kwargs: dict[str, Any] = {
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
                 ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if response_format:
+                kwargs["response_format"] = response_format
+            raw = llm.create_chat_completion(**kwargs)
             content = raw["choices"][0]["message"]["content"]
-            return LLMResponse(content=content, source="llamacpp", raw=raw)
+            return LLMResponse(
+                content=content,
+                source="llamacpp",
+                raw=raw,
+                elapsed_seconds=round(time.perf_counter() - started, 3),
+            )
+        except TypeError as exc:
+            if not response_format:
+                return LLMResponse(
+                    content="",
+                    source="fallback",
+                    error=f"llama.cpp unavailable: {exc}",
+                    elapsed_seconds=round(time.perf_counter() - started, 3),
+                )
+            try:
+                llm = self._load()
+                raw = llm.create_chat_completion(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                content = raw["choices"][0]["message"]["content"]
+                return LLMResponse(
+                    content=content,
+                    source="llamacpp",
+                    raw=raw,
+                    elapsed_seconds=round(time.perf_counter() - started, 3),
+                )
+            except Exception as fallback_exc:
+                return LLMResponse(
+                    content="",
+                    source="fallback",
+                    error=f"llama.cpp unavailable: {fallback_exc}",
+                    elapsed_seconds=round(time.perf_counter() - started, 3),
+                )
         except Exception as exc:
-            return LLMResponse(content="", source="fallback", error=f"llama.cpp unavailable: {exc}")
+            return LLMResponse(
+                content="",
+                source="fallback",
+                error=f"llama.cpp unavailable: {exc}",
+                elapsed_seconds=round(time.perf_counter() - started, 3),
+            )
+        finally:
+            if LLAMACPP_UNLOAD_AFTER_CALL:
+                self.unload()
+
+    @classmethod
+    def complete_chat(
+        cls,
+        messages: list[dict[str, str]],
+        max_tokens: int = LLM_CHAT_MAX_TOKENS,
+        temperature: float = LLM_TEMPERATURE,
+        response_format: dict[str, str] | None = None,
+    ) -> LLMResponse:
+        started = time.perf_counter()
+        try:
+            llm = cls._load()
+            kwargs: dict[str, Any] = {
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if response_format:
+                kwargs["response_format"] = response_format
+            raw = llm.create_chat_completion(**kwargs)
+            content = raw["choices"][0]["message"]["content"]
+            return LLMResponse(
+                content=content,
+                source="llamacpp",
+                raw=raw,
+                elapsed_seconds=round(time.perf_counter() - started, 3),
+            )
+        except TypeError as exc:
+            if not response_format:
+                return LLMResponse(
+                    content="",
+                    source="fallback",
+                    error=f"llama.cpp unavailable: {exc}",
+                    elapsed_seconds=round(time.perf_counter() - started, 3),
+                )
+            try:
+                llm = cls._load()
+                raw = llm.create_chat_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                content = raw["choices"][0]["message"]["content"]
+                return LLMResponse(
+                    content=content,
+                    source="llamacpp",
+                    raw=raw,
+                    elapsed_seconds=round(time.perf_counter() - started, 3),
+                )
+            except Exception as fallback_exc:
+                return LLMResponse(
+                    content="",
+                    source="fallback",
+                    error=f"llama.cpp unavailable: {fallback_exc}",
+                    elapsed_seconds=round(time.perf_counter() - started, 3),
+                )
+        except Exception as exc:
+            return LLMResponse(
+                content="",
+                source="fallback",
+                error=f"llama.cpp unavailable: {exc}",
+                elapsed_seconds=round(time.perf_counter() - started, 3),
+            )
+        finally:
+            if LLAMACPP_UNLOAD_AFTER_CALL:
+                cls.unload()
+
+    @classmethod
+    def unload(cls) -> None:
+        cls._llm = None
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
 
     @classmethod
     def _load(cls) -> Any:
@@ -171,6 +319,7 @@ def runtime_status() -> dict[str, Any]:
                 "llamacpp_preload": LLAMACPP_PRELOAD,
                 "llamacpp_chat_enabled": LLAMACPP_CHAT_ENABLED,
                 "llamacpp_recipe_enabled": LLAMACPP_RECIPE_ENABLED,
+                "llamacpp_unload_after_call": LLAMACPP_UNLOAD_AFTER_CALL,
             }
         )
     return status

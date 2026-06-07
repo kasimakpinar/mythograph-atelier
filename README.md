@@ -20,7 +20,7 @@ Mythograph Atelier is a Gradio app for Hugging Face's Build Small Hackathon. It 
 ## Current MVP
 
 - Chat-first dynamic interview with starter chips, assistant messages, and controls that appear only when needed.
-- No external inference APIs: `llama.cpp` runs the text model in CPU/RAM, and FLUX.2 Klein runs on ZeroGPU for image generation.
+- No external inference APIs: `llama.cpp` runs the text model on ZeroGPU, and FLUX.2 Klein runs afterward on ZeroGPU for image generation.
 - Dynamic control tray for choice cards, multi-choice cards, visual sliders, palette mood, text refinement, and create readiness.
 - FLUX.2 Klein image generation with Pillow as a reliable fallback.
 - JSONL trace logging for conversation turns, control responses, model calls, image generation, and demo sessions.
@@ -58,15 +58,16 @@ MYTHOGRAPH_LLM_MODE=llamacpp
 MYTHOGRAPH_LLAMACPP_REPO_ID=nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF
 MYTHOGRAPH_LLAMACPP_FILENAME=NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf
 MYTHOGRAPH_LLAMACPP_N_CTX=2048
-MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=0
+MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
 MYTHOGRAPH_LLAMACPP_N_THREADS=2
 MYTHOGRAPH_LLAMACPP_PRELOAD=0
-MYTHOGRAPH_LLAMACPP_CHAT_ENABLED=0
-MYTHOGRAPH_LLAMACPP_RECIPE_ENABLED=0
+MYTHOGRAPH_LLAMACPP_CHAT_ENABLED=1
+MYTHOGRAPH_LLAMACPP_RECIPE_ENABLED=1
+MYTHOGRAPH_LLAMACPP_UNLOAD_AFTER_CALL=0
 MYTHOGRAPH_LLM_CHAT_MAX_TOKENS=64
 MYTHOGRAPH_LLM_RECIPE_MAX_TOKENS=220
 MYTHOGRAPH_LLM_TEMPERATURE=0.55
-MYTHOGRAPH_CONVERSATION_MODE=deterministic
+MYTHOGRAPH_CONVERSATION_MODE=model_assisted
 MYTHOGRAPH_IMAGE_MODE=flux
 MYTHOGRAPH_IMAGE_MODEL_ID=black-forest-labs/FLUX.2-klein-4B
 MYTHOGRAPH_IMAGE_WIDTH=1024
@@ -76,7 +77,7 @@ MYTHOGRAPH_IMAGE_DTYPE=float16
 MYTHOGRAPH_IMAGE_CPU_OFFLOAD=1
 ```
 
-The default MVP path keeps chat and recipe construction fast with local adaptive logic. The llama.cpp runtime remains available behind `MYTHOGRAPH_LLAMACPP_CHAT_ENABLED=1` and `MYTHOGRAPH_LLAMACPP_RECIPE_ENABLED=1` for proof experiments, but those calls can be slow on CPU. ZeroGPU should only be consumed by the FLUX image callback.
+The default MVP path uses short GPU llama.cpp calls for creative chat turns and the final recipe. Before FLUX renders, the app unloads llama.cpp and clears CUDA memory so image generation can own the next ZeroGPU allocation.
 
 ## Model Architecture
 
@@ -88,7 +89,7 @@ Llama.from_pretrained(
     filename="NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf",
     n_ctx=2048,
     n_threads=2,
-    n_gpu_layers=0,
+    n_gpu_layers=-1,
 )
 ```
 
@@ -100,19 +101,20 @@ Image:
 FLUX.2 Klein 4B
 1024x768 landscape
 8 steps
-ZeroGPU only
+ZeroGPU after llama.cpp unload
 ```
 
 If FLUX fails to load or generate, the app falls back to Pillow and records the failure in the trace.
 
 ## Trace Proof
 
-For a successful fast MVP run, the downloaded trace should show:
+For a successful no-API GPU run, the downloaded trace should show:
 
 ```text
-llm_conversation_turn.source = deterministic
-llm_conversation_turn.skip_reason = llama.cpp chat disabled for fast interactive turns
-llm_art_recipe.source = deterministic
+llm_conversation_turn.source = llamacpp
+llm_conversation_turn.used_fallback = false
+llm_art_recipe.source = llamacpp
+llm_art_recipe.used_fallback = false
 image_generation.source = flux_klein
 ```
 

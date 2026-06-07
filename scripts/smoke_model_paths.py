@@ -11,7 +11,7 @@ from mythograph.services.interview import choose_next_ui_with_model, new_profile
 
 
 class FakeClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
         if "Choose the next UI action" in system_prompt:
             return LLMResponse(
                 content=json.dumps(
@@ -26,6 +26,7 @@ class FakeClient:
                 source="local",
             )
         assert max_tokens == LLM_RECIPE_MAX_TOKENS
+        assert response_format == {"type": "json_object"}
         return LLMResponse(
             content=json.dumps(
                 {

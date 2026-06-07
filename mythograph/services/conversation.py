@@ -102,25 +102,31 @@ def choose_conversation_turn_with_model(
         encoding="utf-8"
     )
     started = time.perf_counter()
+    payload = {
+        "atelier_state": build_atelier_state(profile),
+        "fallback_turn": fallback_turn.model_dump(),
+        "allowed_control_kinds": [kind.value for kind in ControlKind],
+        "available_option_sets": {
+            "ideas": IDEA_OPTIONS,
+            "styles": STYLE_OPTIONS,
+            "symbols": SYMBOL_OPTIONS,
+            "contrasts": CONTRAST_OPTIONS,
+            "palette_moods": PALETTE_OPTIONS,
+        },
+    }
     response = llm.complete_json(
         system_prompt,
-        {
-            "atelier_state": build_atelier_state(profile),
-            "fallback_turn": fallback_turn.model_dump(),
-            "allowed_control_kinds": [kind.value for kind in ControlKind],
-            "available_option_sets": {
-                "ideas": IDEA_OPTIONS,
-                "styles": STYLE_OPTIONS,
-                "symbols": SYMBOL_OPTIONS,
-                "contrasts": CONTRAST_OPTIONS,
-                "palette_moods": PALETTE_OPTIONS,
-            },
-        },
+        payload,
         max_tokens=LLM_CHAT_MAX_TOKENS,
+        response_format={"type": "json_object"},
     )
-    elapsed_seconds = round(time.perf_counter() - started, 3)
 
-    if response.source == "mock" or response.error:
+    if response.source == "mock":
+        return fallback_turn
+
+    if response.error:
+        elapsed_seconds = round(time.perf_counter() - started, 3)
+        error_turn = model_error_turn("The text model could not answer cleanly. Try one shorter phrase.")
         log_event(
             "llm_conversation_turn",
             {
@@ -129,32 +135,75 @@ def choose_conversation_turn_with_model(
                 "error": response.error,
                 "transport_error": response.error,
                 "raw_content": response.content,
-                "used_fallback": True,
+                "used_fallback": False,
+                "retry_count": 0,
+                "chosen_control": error_turn.controls[0].kind if error_turn.controls else None,
                 "atelier_state": build_atelier_state(profile),
-                "turn": fallback_turn.model_dump(),
+                "turn": error_turn.model_dump(),
             },
         )
-        return fallback_turn
+        return error_turn
 
     try:
         candidate = ConversationTurn.model_validate(extract_json_object(response.content))
         candidate = sanitize_conversation_turn(candidate, fallback_turn)
     except Exception as exc:
+        repair_response = llm.complete_json(
+            _repair_system_prompt(),
+            {
+                "invalid_json": response.content,
+                "required_shape": "ConversationTurn JSON with assistant_message, progress_label, reason, is_ready, controls.",
+                "fallback_turn": fallback_turn.model_dump(),
+            },
+            max_tokens=LLM_CHAT_MAX_TOKENS,
+            response_format={"type": "json_object"},
+        )
+        try:
+            candidate = ConversationTurn.model_validate(extract_json_object(repair_response.content))
+            candidate = sanitize_conversation_turn(candidate, fallback_turn)
+        except Exception as repair_exc:
+            elapsed_seconds = round(time.perf_counter() - started, 3)
+            error_turn = model_error_turn("The text model drifted outside the UI schema. Try one sharper sentence.")
+            raw_content = repair_response.content or response.content
+            error_text = f"{exc}; repair failed: {repair_exc}"
+            if repair_response.error:
+                error_text += f"; repair transport: {repair_response.error}"
+            log_event(
+                "llm_conversation_turn",
+                {
+                    "source": repair_response.source or response.source,
+                    "elapsed_seconds": elapsed_seconds,
+                    "error": error_text,
+                    "transport_error": repair_response.error,
+                    "raw_content": raw_content,
+                    "used_fallback": False,
+                    "retry_count": 1,
+                    "chosen_control": error_turn.controls[0].kind if error_turn.controls else None,
+                    "atelier_state": build_atelier_state(profile),
+                    "turn": error_turn.model_dump(),
+                },
+            )
+            return error_turn
+
+        elapsed_seconds = round(time.perf_counter() - started, 3)
         log_event(
             "llm_conversation_turn",
             {
-                "source": response.source,
+                "source": repair_response.source,
                 "elapsed_seconds": elapsed_seconds,
                 "error": str(exc),
-                "transport_error": response.error,
-                "raw_content": response.content,
-                "used_fallback": True,
+                "transport_error": repair_response.error,
+                "raw_content": repair_response.content,
+                "used_fallback": False,
+                "retry_count": 1,
+                "chosen_control": candidate.controls[0].kind if candidate.controls else None,
                 "atelier_state": build_atelier_state(profile),
-                "turn": fallback_turn.model_dump(),
+                "turn": candidate.model_dump(),
             },
         )
-        return fallback_turn
+        return candidate
 
+    elapsed_seconds = round(time.perf_counter() - started, 3)
     log_event(
         "llm_conversation_turn",
         {
@@ -163,11 +212,37 @@ def choose_conversation_turn_with_model(
             "transport_error": response.error,
             "raw_content": response.content,
             "used_fallback": False,
+            "retry_count": 0,
+            "chosen_control": candidate.controls[0].kind if candidate.controls else None,
             "atelier_state": build_atelier_state(profile),
             "turn": candidate.model_dump(),
         },
     )
     return candidate
+
+
+def model_error_turn(message: str) -> ConversationTurn:
+    return ConversationTurn(
+        assistant_message=message,
+        progress_label="Model: retry needed",
+        reason="llama.cpp did not return valid schema JSON",
+        is_ready=False,
+        controls=[
+            DynamicControl(
+                kind=ControlKind.TEXT_REFINEMENT,
+                label="Retry",
+                prompt="Send a shorter signal and the atelier will ask again.",
+            )
+        ],
+    )
+
+
+def _repair_system_prompt() -> str:
+    return (
+        "Return only valid JSON for Mythograph Atelier. No markdown. "
+        "Keep one control only. Use allowed kind names exactly. "
+        "If unsure, use text_refinement with empty options and sliders."
+    )
 
 
 def build_atelier_state(profile: InterviewProfile) -> dict:

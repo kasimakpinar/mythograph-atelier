@@ -4,8 +4,8 @@
 # llama_cpp for the no-API text model. Keep this file as a badge/runbook
 # reference for alternate llama.cpp wheels.
 #
-# CPU wheel for the no-API text model path on Hugging Face Spaces.
---extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# CUDA wheel for the no-API text model path on Hugging Face Spaces.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 --only-binary llama-cpp-python
-llama-cpp-python==0.3.26
+llama-cpp-python==0.3.16
 huggingface-hub>=0.34.0

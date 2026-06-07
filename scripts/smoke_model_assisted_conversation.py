@@ -10,8 +10,9 @@ import mythograph.services.conversation as conversation
 
 
 class GoodClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
         assert max_tokens == conversation.LLM_CHAT_MAX_TOKENS
+        assert response_format == {"type": "json_object"}
         assert "atelier_state" in user_payload
         assert "chat_history" not in user_payload
         assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
@@ -38,8 +39,38 @@ class GoodClient:
 
 
 class BadClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
         return LLMResponse(content="not json", source="llamacpp")
+
+
+class RepairClient:
+    def __init__(self):
+        self.calls = 0
+
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(content="not json", source="llamacpp")
+        return LLMResponse(
+            content=json.dumps(
+                {
+                    "assistant_message": "Choose the symbol that keeps returning.",
+                    "progress_label": "Symbol: repaired",
+                    "reason": "repair produced valid UI JSON",
+                    "is_ready": False,
+                    "controls": [
+                        {
+                            "kind": "multi_choice_cards",
+                            "label": "Returning symbol",
+                            "prompt": "Pick one or two.",
+                            "options": ["a mirror", "a flame"],
+                            "sliders": [],
+                        }
+                    ],
+                }
+            ),
+            source="llamacpp",
+        )
 
 
 def main() -> None:
@@ -55,8 +86,13 @@ def main() -> None:
         assert good.controls[0].kind == ControlKind.SWATCH_PICKER
         assert good.controls[0].options[0] == "ash, gold, pale blue"
 
+        repaired = conversation.choose_conversation_turn_with_model(profile, fallback, RepairClient())
+        assert repaired.controls[0].kind == ControlKind.MULTI_CHOICE_CARDS
+        assert repaired.controls[0].options[0] == "a mirror"
+
         bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
-        assert bad.model_dump() == fallback.model_dump()
+        assert bad.controls[0].kind == ControlKind.TEXT_REFINEMENT
+        assert bad.progress_label == "Model: retry needed"
     finally:
         conversation.CONVERSATION_MODE = original_mode
 

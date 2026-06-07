@@ -118,6 +118,7 @@ def build_art_recipe_with_model(
             "fallback_recipe": fallback.model_dump(),
         },
         max_tokens=LLM_RECIPE_MAX_TOKENS,
+        response_format={"type": "json_object"},
     )
     elapsed_seconds = round(time.perf_counter() - started, 3)
 
@@ -143,6 +144,7 @@ def build_art_recipe_with_model(
                 "transport_error": response.error,
                 "raw_content": response.content,
                 "used_fallback": True,
+                "retry_count": 0,
                 "recipe": fallback.model_dump(),
             },
         )
@@ -151,19 +153,50 @@ def build_art_recipe_with_model(
     try:
         recipe = ArtRecipe.model_validate(extract_json_object(response.content))
     except Exception as exc:
+        repair_response = llm.complete_json(
+            _repair_recipe_prompt(),
+            {
+                "invalid_json": response.content,
+                "fallback_recipe": fallback.model_dump(),
+            },
+            max_tokens=LLM_RECIPE_MAX_TOKENS,
+            response_format={"type": "json_object"},
+        )
+        try:
+            recipe = ArtRecipe.model_validate(extract_json_object(repair_response.content))
+        except Exception as repair_exc:
+            error_text = f"{exc}; repair failed: {repair_exc}"
+            if repair_response.error:
+                error_text += f"; repair transport: {repair_response.error}"
+            log_event(
+                "llm_art_recipe",
+                {
+                    "source": repair_response.source or response.source,
+                    "elapsed_seconds": round(time.perf_counter() - started, 3),
+                    "error": error_text,
+                    "transport_error": repair_response.error,
+                    "raw_content": repair_response.content or response.content,
+                    "used_fallback": True,
+                    "retry_count": 1,
+                    "recipe": fallback.model_dump(),
+                },
+            )
+            return fallback
+
         log_event(
             "llm_art_recipe",
             {
-                "source": response.source,
-                "elapsed_seconds": elapsed_seconds,
+                "source": repair_response.source,
+                "elapsed_seconds": round(time.perf_counter() - started, 3),
                 "error": str(exc),
-                "transport_error": response.error,
-                "raw_content": response.content,
-                "used_fallback": True,
-                "recipe": fallback.model_dump(),
+                "transport_error": repair_response.error,
+                "raw_content": repair_response.content,
+                "used_fallback": False,
+                "retry_count": 1,
+                "recipe": recipe.model_dump(),
             },
         )
-        return fallback
+        return recipe
 
     log_event(
         "llm_art_recipe",
@@ -173,10 +206,20 @@ def build_art_recipe_with_model(
             "transport_error": response.error,
             "raw_content": response.content,
             "used_fallback": False,
+            "retry_count": 0,
             "recipe": recipe.model_dump(),
         },
     )
     return recipe
+
+
+def _repair_recipe_prompt() -> str:
+    return (
+        "Return only valid JSON for an ArtRecipe. No markdown. "
+        "Required keys: title, main_idea, visual_style, palette, symbols, composition, "
+        "image_prompt, negative_prompt, friend_explanation. "
+        "symbols must be objects with visual and meaning."
+    )
 
 
 def _adjust_style(style: str, instruction: str) -> str:

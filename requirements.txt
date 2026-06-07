@@ -5,10 +5,10 @@ numpy>=1.26
 spaces>=0.40.0
 
 # llama.cpp text path. The app runs Nemotron GGUF locally through this runtime.
-# Defaults use CPU/RAM with n_gpu_layers=0 for the no-API badge path.
---extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# Defaults use CUDA llama.cpp on ZeroGPU for the no-API badge path.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 --only-binary llama-cpp-python
-llama-cpp-python==0.3.26
+llama-cpp-python==0.3.16
 huggingface-hub>=0.34.0
 
 # FLUX.2 Klein image path. The Gradio image callback is the ZeroGPU workload.

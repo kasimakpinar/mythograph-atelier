@@ -3,7 +3,7 @@ import spaces
 
 from mythograph.config import APP_TITLE, ROOT_DIR
 from mythograph.models.image_client import ImageClient
-from mythograph.models.llm_client import preload_llamacpp_if_configured, runtime_status
+from mythograph.models.llm_client import LlamaCppClient, preload_llamacpp_if_configured, runtime_status
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn
 from mythograph.services.art_recipe import build_art_recipe_with_model
@@ -275,7 +275,8 @@ def _format_runtime_status() -> str:
         model = (
             f'{status["llamacpp_repo_id"]} / {status["llamacpp_filename"]} '
             f'(CPU threads: {status["llamacpp_n_threads"]}, preload: {status["llamacpp_preload"]}, '
-            f'chat: {status["llamacpp_chat_enabled"]}, recipe: {status["llamacpp_recipe_enabled"]})'
+            f'GPU layers: {status["llamacpp_n_gpu_layers"]}, chat: {status["llamacpp_chat_enabled"]}, '
+            f'recipe: {status["llamacpp_recipe_enabled"]}, unload: {status["llamacpp_unload_after_call"]})'
         )
     elif mode == "local":
         model = f'{status["openai_compatible_model"]} at {status["openai_compatible_base_url"]}'
@@ -302,18 +303,22 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
         yield _reset()
         return
     director_history = (history or []) + [_message("user", clean)]
-    yield _thinking_render(_profile(profile_data), director_history, "Thinking: CPU art director is choosing the next question")
-    profile, turn = advance_conversation(_profile(profile_data), user_message=clean)
+    yield _thinking_render(_profile(profile_data), director_history, "GPU text model queued: choosing the next question")
+    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, clean, None)
+    profile = _profile(profile_data)
+    turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    yield _render(profile, chat, turn)
+    yield _render(profile, chat, turn, activity="GPU text model done.")
 
 
 def _submit_starter(profile_data: dict, history: list[dict], text: str):
     director_history = (history or []) + [_message("user", text)]
-    yield _thinking_render(_profile(profile_data), director_history, "Thinking: CPU art director is opening the studio")
-    profile, turn = advance_conversation(_profile(profile_data), user_message=text)
+    yield _thinking_render(_profile(profile_data), director_history, "GPU text model queued: opening the studio")
+    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, text, None)
+    profile = _profile(profile_data)
+    turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    yield _render(profile, chat, turn)
+    yield _render(profile, chat, turn, activity="GPU text model done.")
 
 
 def _submit_choice(profile_data: dict, history: list[dict], value: str | None):
@@ -351,10 +356,12 @@ def _submit_swatch(profile_data: dict, history: list[dict], value: str | None):
 
 def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):
     director_history = (history or []) + [_message("user", user_summary)]
-    yield _thinking_render(_profile(profile_data), director_history, "Thinking: CPU art director is adapting the controls")
-    profile, turn = advance_conversation(_profile(profile_data), control_response=response)
+    yield _thinking_render(_profile(profile_data), director_history, "GPU text model queued: adapting the controls")
+    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, "", response.model_dump())
+    profile = _profile(profile_data)
+    turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    yield _render(profile, chat, turn)
+    yield _render(profile, chat, turn, activity="GPU text model done.")
 
 
 def _thinking_render(profile: InterviewProfile, history: list[dict], progress_label: str):
@@ -367,8 +374,19 @@ def _thinking_render(profile: InterviewProfile, history: list[dict], progress_la
             reason="model-assisted turn is running",
             is_ready=False,
         ),
-        activity="llama.cpp is running on CPU/RAM. The first turn can include model download/load time.",
+        activity="llama.cpp is queued for ZeroGPU. The first turn can include model download/load time.",
     )
+
+
+@spaces.GPU(duration=60)
+def _advance_conversation_on_gpu(profile_data: dict, user_message: str, control_response_data: dict | None):
+    response = ControlResponse.model_validate(control_response_data) if control_response_data else None
+    profile, turn = advance_conversation(
+        _profile(profile_data),
+        user_message=user_message,
+        control_response=response,
+    )
+    return profile.model_dump(), turn.model_dump()
 
 
 def _render(
@@ -446,11 +464,12 @@ def _slider_value(turn: ConversationTurn, key: str, default: int) -> int:
     return default
 
 
+@spaces.GPU(duration=120)
 def _prepare_generation(profile_data: dict, history: list[dict], recipe_data: dict | None):
     profile = _profile(profile_data)
-    working_history = (history or []) + [_message("assistant", "I am preparing the art recipe on the CPU text model.")]
+    working_history = (history or []) + [_message("assistant", "I am preparing the art recipe with the GPU text model.")]
     turn = ConversationTurn(
-        assistant_message="I am preparing the art recipe on the CPU text model.",
+        assistant_message="I am preparing the art recipe with the GPU text model.",
         progress_label="Painting: art director is working",
         reason="generation started",
         is_ready=False,
@@ -461,18 +480,19 @@ def _prepare_generation(profile_data: dict, history: list[dict], recipe_data: di
         working_history,
         turn,
         recipe.model_dump(),
-        "CPU recipe ready.\n"
+        "GPU text recipe ready.\n"
         f"Runtime mode: {runtime_status()['mode']}\n"
         f"Title: {recipe.title}\n"
-        "Requesting ZeroGPU for FLUX rendering now.",
+        "Unloading llama.cpp before requesting FLUX.",
     )
 
 
+@spaces.GPU(duration=120)
 def _prepare_regeneration(profile_data: dict, history: list[dict], recipe_data: dict | None, instruction: str | None):
     profile = _profile(profile_data)
-    working_history = (history or []) + [_message("assistant", "I am revising the recipe on the CPU text model.")]
+    working_history = (history or []) + [_message("assistant", "I am revising the recipe with the GPU text model.")]
     turn = ConversationTurn(
-        assistant_message="I am revising the recipe on the CPU text model.",
+        assistant_message="I am revising the recipe with the GPU text model.",
         progress_label="Painting: art director is revising",
         reason="regeneration started",
         is_ready=False,
@@ -483,10 +503,10 @@ def _prepare_regeneration(profile_data: dict, history: list[dict], recipe_data: 
         working_history,
         turn,
         recipe.model_dump(),
-        "CPU recipe revision ready.\n"
+        "GPU text recipe revision ready.\n"
         f"Instruction: {instruction or 'Surprise me'}\n"
         f"Title: {recipe.title}\n"
-        "Requesting ZeroGPU for FLUX rendering now.",
+        "Unloading llama.cpp before requesting FLUX.",
     )
 
 
@@ -508,6 +528,7 @@ def _render_prepared_image(
         )
     from mythograph.schemas.art_recipe import ArtRecipe
 
+    LlamaCppClient.unload()
     recipe = ArtRecipe.model_validate(recipe_data)
     image_result = ImageClient().generate(recipe)
     log_event(
