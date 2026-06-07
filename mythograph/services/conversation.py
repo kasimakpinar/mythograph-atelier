@@ -144,7 +144,9 @@ def choose_conversation_turn_with_model(
         return error_turn
 
     try:
-        candidate = ConversationTurn.model_validate(extract_json_object(response.content))
+        candidate = ConversationTurn.model_validate(
+            _normalize_turn_payload(extract_json_object(response.content), fallback_turn)
+        )
         candidate = sanitize_conversation_turn(candidate, fallback_turn, profile)
     except Exception as exc:
         repair_response = llm.complete_json(
@@ -159,7 +161,9 @@ def choose_conversation_turn_with_model(
             response_format={"type": "json_object"},
         )
         try:
-            candidate = ConversationTurn.model_validate(extract_json_object(repair_response.content))
+            candidate = ConversationTurn.model_validate(
+                _normalize_turn_payload(extract_json_object(repair_response.content), fallback_turn)
+            )
             candidate = sanitize_conversation_turn(candidate, fallback_turn, profile)
         except Exception as repair_exc:
             elapsed_seconds = round(time.perf_counter() - started, 3)
@@ -275,6 +279,101 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
         "turn_count": profile.turn_count,
         "already_chosen": _recent_choices(profile),
     }
+
+
+def _normalize_turn_payload(payload: dict, fallback_turn: ConversationTurn) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    controls = payload.get("controls")
+    if not isinstance(controls, list) or not controls:
+        return payload
+
+    control = controls[0]
+    if not isinstance(control, dict):
+        return payload
+
+    if not str(control.get("prompt", "")).strip():
+        control["prompt"] = _prompt_from_control(control, payload, fallback_turn)
+
+    kind = str(control.get("kind", ""))
+    if kind == ControlKind.SLIDER_GROUP.value:
+        control["options"] = []
+        control["sliders"] = _normalize_slider_payload(control.get("sliders"), control)
+    elif kind == ControlKind.TEXT_REFINEMENT.value:
+        control["options"] = []
+        control["sliders"] = []
+    elif kind in {
+        ControlKind.CHOICE_CARDS.value,
+        ControlKind.MULTI_CHOICE_CARDS.value,
+        ControlKind.SWATCH_PICKER.value,
+        ControlKind.READY_BUTTON.value,
+    }:
+        control["sliders"] = []
+        if not isinstance(control.get("options"), list):
+            control["options"] = []
+    controls[0] = control
+    payload["controls"] = [control]
+    return payload
+
+
+def _prompt_from_control(control: dict, payload: dict, fallback_turn: ConversationTurn) -> str:
+    for key in ("prompt", "label"):
+        value = str(control.get(key, "")).strip()
+        if value:
+            return value
+    message = str(payload.get("assistant_message", "")).strip()
+    if message:
+        return message
+    if fallback_turn.controls:
+        return fallback_turn.controls[0].prompt
+    return "Choose one direction."
+
+
+def _normalize_slider_payload(sliders: object, control: dict) -> list[dict]:
+    if isinstance(sliders, list) and sliders and all(isinstance(slider, dict) for slider in sliders):
+        return sliders[:3]
+
+    if isinstance(sliders, list) and sliders and all(isinstance(slider, str) for slider in sliders):
+        return [_slider_from_name(name, index) for index, name in enumerate(sliders[:3])]
+
+    label = str(control.get("label", "")).strip() or "Intensity"
+    left_label = str(control.get("left_label", "")).strip() or "quiet"
+    right_label = str(control.get("right_label", "")).strip() or "bright"
+    value = control.get("value", 50)
+    return [
+        {
+            "key": _slider_key(label),
+            "label": label,
+            "left_label": left_label,
+            "right_label": right_label,
+            "value": value,
+        }
+    ]
+
+
+def _slider_from_name(name: str, index: int) -> dict:
+    clean = str(name).strip() or f"slider_{index + 1}"
+    lower = clean.lower()
+    defaults = {
+        "density": ("minimal", "layered", 45),
+        "intensity": ("soft", "bright", 55),
+        "range": ("contained", "open", 50),
+        "spacing": ("tight", "open", 50),
+        "pulse": ("still", "vibrant", 55),
+    }
+    left_label, right_label, value = defaults.get(lower, ("less", "more", 50))
+    return {
+        "key": _slider_key(clean),
+        "label": clean.replace("_", " ").title(),
+        "left_label": left_label,
+        "right_label": right_label,
+        "value": value,
+    }
+
+
+def _slider_key(value: str) -> str:
+    key = "_".join(str(value).lower().strip().split())
+    return "".join(char for char in key if char.isalnum() or char == "_") or "slider"
 
 
 def _next_need_from_turn(turn: ConversationTurn) -> dict:

@@ -103,6 +103,31 @@ class WrongStageClient:
         )
 
 
+class LooseSliderClient:
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+        return LLMResponse(
+            content=json.dumps(
+                {
+                    "assistant_message": "What pulse?",
+                    "progress_label": "mood",
+                    "reason": "intensity",
+                    "is_ready": False,
+                    "controls": [
+                        {
+                            "kind": "slider_group",
+                            "label": "pulse",
+                            "left_label": "bare",
+                            "right_label": "vibrant",
+                            "value": 50,
+                            "sliders": ["density", "intensity", "range"],
+                        }
+                    ],
+                }
+            ),
+            source="llamacpp",
+        )
+
+
 def main() -> None:
     original_mode = conversation.CONVERSATION_MODE
     conversation.CONVERSATION_MODE = "model_assisted"
@@ -126,6 +151,16 @@ def main() -> None:
         wrong_stage = conversation.choose_conversation_turn_with_model(profile, fallback, WrongStageClient())
         assert wrong_stage.controls[0].kind == ControlKind.TEXT_REFINEMENT
         assert wrong_stage.progress_label == "Model: retry needed"
+
+        slider_profile = conversation.new_profile()
+        slider_profile.ideas.extend(["I want something about being positive", "sharp"])
+        slider_profile.free_notes.append("pulse")
+        slider_profile = conversation.update_scores(slider_profile)
+        slider_fallback = conversation.choose_conversation_turn(slider_profile)
+        loose_slider = conversation.choose_conversation_turn_with_model(slider_profile, slider_fallback, LooseSliderClient())
+        assert loose_slider.controls[0].kind == ControlKind.SLIDER_GROUP
+        assert loose_slider.controls[0].prompt == "pulse"
+        assert loose_slider.controls[0].sliders[0].key == "density"
 
         bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
         assert bad.controls[0].kind == ControlKind.TEXT_REFINEMENT
