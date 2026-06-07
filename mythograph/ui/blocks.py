@@ -125,6 +125,16 @@ def build_demo() -> gr.Blocks:
                 chat_submit = gr.Button("Send", variant="primary", scale=1, elem_classes=["ma-send"])
                 reset_button = gr.Button("Reset", scale=1, elem_classes=["ma-ghost"])
 
+            with gr.Accordion("Model activity", open=False):
+                model_activity = gr.Textbox(
+                    label="Activity",
+                    lines=7,
+                    visible=False,
+                    interactive=False,
+                )
+                trace_button = gr.Button("Download trace", visible=False)
+                trace_file = gr.File(label="Trace export", visible=False)
+
             with gr.Group(visible=False, elem_id="ma-gallery") as gallery_group:
                 with gr.Row(elem_classes=["ma-gallery-grid"]):
                     with gr.Column(scale=5):
@@ -141,15 +151,6 @@ def build_demo() -> gr.Blocks:
                         )
                         regen_button = gr.Button("Apply regeneration", visible=False)
                         image_prompt = gr.Textbox(label="Image prompt", lines=4, visible=False)
-                        with gr.Accordion("Model activity", open=False):
-                            model_activity = gr.Textbox(
-                                label="Activity",
-                                lines=7,
-                                visible=False,
-                                interactive=False,
-                            )
-                        trace_file = gr.File(label="Trace export", visible=False)
-                        trace_button = gr.Button("Download trace", visible=False)
 
         flow_outputs = [
             profile_state,
@@ -308,7 +309,7 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
     profile = _profile(profile_data)
     turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    yield _render(profile, chat, turn, activity="GPU text model done.")
+    yield _render(profile, chat, turn, activity=_activity_for_turn(turn, "GPU text model done."))
 
 
 def _submit_starter(profile_data: dict, history: list[dict], text: str):
@@ -318,7 +319,7 @@ def _submit_starter(profile_data: dict, history: list[dict], text: str):
     profile = _profile(profile_data)
     turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    yield _render(profile, chat, turn, activity="GPU text model done.")
+    yield _render(profile, chat, turn, activity=_activity_for_turn(turn, "GPU text model done."))
 
 
 def _submit_choice(profile_data: dict, history: list[dict], value: str | None):
@@ -361,7 +362,7 @@ def _submit_control(profile_data: dict, history: list[dict], response: ControlRe
     profile = _profile(profile_data)
     turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    yield _render(profile, chat, turn, activity="GPU text model done.")
+    yield _render(profile, chat, turn, activity=_activity_for_turn(turn, "GPU text model done."))
 
 
 def _thinking_render(profile: InterviewProfile, history: list[dict], progress_label: str):
@@ -376,6 +377,16 @@ def _thinking_render(profile: InterviewProfile, history: list[dict], progress_la
         ),
         activity="llama.cpp is queued for ZeroGPU. The first turn can include model download/load time.",
     )
+
+
+def _activity_for_turn(turn: ConversationTurn, default: str) -> str:
+    if turn.progress_label == "Model: retry needed":
+        return (
+            "GPU text model returned an error before a valid UI turn could be shown.\n"
+            f"Detail: {turn.reason}\n"
+            "Use Download trace for the full raw runtime error."
+        )
+    return default
 
 
 @spaces.GPU(duration=60)
@@ -408,7 +419,7 @@ def _render(
     prompt = gr.update(visible=False)
     regen = gr.update(visible=False)
     regen_button = gr.update(visible=False)
-    trace_button = gr.update(visible=False)
+    trace_button = gr.update(visible=bool(history) or bool(activity))
     model_activity = gr.update(value=activity, visible=bool(activity))
     if recipe:
         label = f"## {recipe.title}\n\n{recipe.friend_explanation}"

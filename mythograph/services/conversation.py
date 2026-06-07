@@ -126,7 +126,10 @@ def choose_conversation_turn_with_model(
 
     if response.error:
         elapsed_seconds = round(time.perf_counter() - started, 3)
-        error_turn = model_error_turn("The text model could not answer cleanly. Try one shorter phrase.")
+        error_turn = model_error_turn(
+            "The text model could not answer cleanly. Try one shorter phrase.",
+            response.error,
+        )
         log_event(
             "llm_conversation_turn",
             {
@@ -163,11 +166,14 @@ def choose_conversation_turn_with_model(
             candidate = sanitize_conversation_turn(candidate, fallback_turn)
         except Exception as repair_exc:
             elapsed_seconds = round(time.perf_counter() - started, 3)
-            error_turn = model_error_turn("The text model drifted outside the UI schema. Try one sharper sentence.")
             raw_content = repair_response.content or response.content
             error_text = f"{exc}; repair failed: {repair_exc}"
             if repair_response.error:
                 error_text += f"; repair transport: {repair_response.error}"
+            error_turn = model_error_turn(
+                "The text model drifted outside the UI schema. Try one sharper sentence.",
+                error_text,
+            )
             log_event(
                 "llm_conversation_turn",
                 {
@@ -221,11 +227,14 @@ def choose_conversation_turn_with_model(
     return candidate
 
 
-def model_error_turn(message: str) -> ConversationTurn:
+def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
+    reason = "llama.cpp did not return valid schema JSON"
+    if detail:
+        reason = f"{reason}: {detail[:900]}"
     return ConversationTurn(
         assistant_message=message,
         progress_label="Model: retry needed",
-        reason="llama.cpp did not return valid schema JSON",
+        reason=reason,
         is_ready=False,
         controls=[
             DynamicControl(
