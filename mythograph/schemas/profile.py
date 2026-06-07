@@ -16,5 +16,7 @@ class InterviewProfile(BaseModel):
     symbols: list[str] = Field(default_factory=list)
     contrasts: list[str] = Field(default_factory=list)
     free_notes: list[str] = Field(default_factory=list)
+    asked_questions: list[str] = Field(default_factory=list)
+    offered_options: list[str] = Field(default_factory=list)
     turn_count: int = 0
     scores: ObjectiveScores = Field(default_factory=ObjectiveScores)

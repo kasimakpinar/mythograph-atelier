@@ -50,6 +50,7 @@ def advance_conversation(
     profile = update_scores(profile)
     fallback_turn = choose_conversation_turn(profile)
     turn = choose_conversation_turn_with_model(profile, fallback_turn, client)
+    _remember_model_turn(profile, turn)
     log_event(
         "conversation_turn",
         {
@@ -278,6 +279,8 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
         "scores": profile.scores.model_dump(),
         "turn_count": profile.turn_count,
         "already_chosen": _recent_choices(profile),
+        "avoid_questions": profile.asked_questions[-5:],
+        "avoid_options": profile.offered_options[-16:],
     }
 
 
@@ -386,7 +389,7 @@ def _next_need_from_turn(turn: ConversationTurn) -> dict:
 
 
 def _recent_choices(profile: InterviewProfile) -> list[str]:
-    answers = profile.ideas + profile.styles + profile.symbols + profile.contrasts + profile.free_notes
+    answers = profile.ideas + profile.styles + profile.symbols + profile.contrasts + profile.free_notes + profile.offered_options
     answers.extend(str(value) for value in profile.visual_preferences.values() if value not in (None, ""))
     return [_normalize_text(answer)[:80] for answer in answers[-10:] if _normalize_text(answer)]
 
@@ -444,6 +447,7 @@ def sanitize_conversation_turn(
         raise ValueError(f"{control.kind.value} needs at least one option")
     if control.kind == ControlKind.SLIDER_GROUP and not control.sliders:
         raise ValueError("slider_group needs at least one slider")
+    candidate.assistant_message = _polish_assistant_message(candidate, profile)
     return candidate
 
 
@@ -451,6 +455,27 @@ def _ready_message(profile: InterviewProfile) -> str:
     idea = _first_nonempty(profile.ideas + profile.free_notes)
     fragment = _short_fragment(idea) if idea else "this feeling"
     return f"I have enough to make {fragment} visible as an abstract painting."
+
+
+def _polish_assistant_message(candidate: ConversationTurn, profile: InterviewProfile) -> str:
+    message = " ".join(candidate.assistant_message.strip().split())
+    control = candidate.controls[0] if candidate.controls else None
+    normalized = _normalize_text(message).rstrip("?")
+    too_thin = len(message.split()) <= 3
+    repeated = normalized in {_normalize_text(question).rstrip("?") for question in profile.asked_questions[-5:]}
+    main_words = set(_normalize_text(_first_nonempty(profile.ideas)).split())
+    overlap = len(main_words.intersection(set(normalized.split()))) >= 2 if main_words else False
+    if not control or (not too_thin and not repeated and not overlap):
+        return message
+    if control.kind == ControlKind.SLIDER_GROUP:
+        return "How should that feeling move across the canvas?"
+    if control.kind == ControlKind.SWATCH_PICKER:
+        return "What color weather should carry this feeling?"
+    if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS}:
+        if profile.visual_preferences.get("palette_mood"):
+            return "What should remain in the room after the first glance?"
+        return "Which detail makes this feeling yours?"
+    return message or "What should the painting understand next?"
 
 
 def _expected_control_kind(fallback_turn: ConversationTurn) -> ControlKind | None:
@@ -487,6 +512,8 @@ def _sanitize_options(options: list[str], blocked_options: list[str], profile: I
 
 def _companion_options(profile: InterviewProfile, existing: list[str]) -> list[str]:
     idea = _normalize_text(_first_nonempty(profile.ideas + profile.free_notes))
+    if "rain" in idea:
+        return ["a silver laugh", "wet pavement light", "after-storm yellow", "small ripples"]
     if "lonely" in idea or "loneliness" in idea or "silence" in idea:
         return ["a private echo", "a held breath", "a small warm distance", "an open room"]
     if "positive" in idea or "hope" in idea:
@@ -499,6 +526,19 @@ def _companion_options(profile: InterviewProfile, existing: list[str]) -> list[s
         "a quiet counterweight",
         "something unnamed",
     ]
+
+
+def _remember_model_turn(profile: InterviewProfile, turn: ConversationTurn) -> None:
+    question = turn.assistant_message.strip()
+    if question and question not in profile.asked_questions:
+        profile.asked_questions.append(question)
+    if turn.controls:
+        for option in turn.controls[0].options:
+            clean = option.strip()
+            if clean and clean not in profile.offered_options:
+                profile.offered_options.append(clean)
+    profile.asked_questions = profile.asked_questions[-8:]
+    profile.offered_options = profile.offered_options[-24:]
 
 
 def _clean_option_text(value: str) -> str:

@@ -134,18 +134,20 @@ def build_art_recipe_with_model(
     elapsed_seconds = round(time.perf_counter() - started, 3)
 
     if response.source == "mock":
+        personalized_fallback = _personalize_recipe(fallback, profile, fallback)
         log_event(
             "llm_art_recipe",
             {
                 "source": "mock",
                 "elapsed_seconds": elapsed_seconds,
                 "used_fallback": True,
-                "recipe": fallback.model_dump(),
+                "recipe": personalized_fallback.model_dump(),
             },
         )
-        return fallback
+        return personalized_fallback
 
     if response.error:
+        personalized_fallback = _personalize_recipe(fallback, profile, fallback)
         log_event(
             "llm_art_recipe",
             {
@@ -156,13 +158,13 @@ def build_art_recipe_with_model(
                 "raw_content": response.content,
                 "used_fallback": True,
                 "retry_count": 0,
-                "recipe": fallback.model_dump(),
+                "recipe": personalized_fallback.model_dump(),
             },
         )
-        return fallback
+        return personalized_fallback
 
     try:
-        recipe = ArtRecipe.model_validate(extract_json_object(response.content))
+        recipe = ArtRecipe.model_validate(_normalize_recipe_payload(extract_json_object(response.content), profile))
         recipe = _personalize_recipe(recipe, profile, fallback)
     except Exception as exc:
         repair_response = llm.complete_json(
@@ -175,7 +177,7 @@ def build_art_recipe_with_model(
             response_format={"type": "json_object"},
         )
         try:
-            recipe = ArtRecipe.model_validate(extract_json_object(repair_response.content))
+            recipe = ArtRecipe.model_validate(_normalize_recipe_payload(extract_json_object(repair_response.content), profile))
             recipe = _personalize_recipe(recipe, profile, fallback)
         except Exception as repair_exc:
             error_text = f"{exc}; repair failed: {repair_exc}"
@@ -191,10 +193,10 @@ def build_art_recipe_with_model(
                     "raw_content": repair_response.content or response.content,
                     "used_fallback": True,
                     "retry_count": 1,
-                    "recipe": fallback.model_dump(),
+                    "recipe": _personalize_recipe(fallback, profile, fallback).model_dump(),
                 },
             )
-            return fallback
+            return _personalize_recipe(fallback, profile, fallback)
 
         log_event(
             "llm_art_recipe",
@@ -236,6 +238,32 @@ def _repair_recipe_prompt() -> str:
     )
 
 
+def _normalize_recipe_payload(payload: dict, profile: InterviewProfile) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    symbols = payload.get("symbols")
+    if not isinstance(symbols, list):
+        symbols = []
+    normalized_symbols: list[dict] = []
+    for symbol in symbols:
+        if isinstance(symbol, dict):
+            visual = str(symbol.get("visual", "")).strip()
+            meaning = str(symbol.get("meaning", "")).strip()
+            if visual and meaning:
+                normalized_symbols.append({"visual": visual, "meaning": meaning})
+    for symbol in _symbols_from_profile(profile):
+        if len(normalized_symbols) >= 3:
+            break
+        if all(existing["visual"].lower() != symbol.visual.lower() for existing in normalized_symbols):
+            normalized_symbols.append(symbol.model_dump())
+    payload["symbols"] = normalized_symbols[:6]
+    if not payload.get("negative_prompt"):
+        payload["negative_prompt"] = "text, letters, words, signature, watermark, literal portrait, photorealistic scene"
+    if not payload.get("friend_explanation"):
+        payload["friend_explanation"] = _personal_connection_explanation(profile, ArtRecipe.model_validate(build_art_recipe(profile).model_dump()))
+    return payload
+
+
 def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: ArtRecipe) -> ArtRecipe:
     recipe.title = recipe.title.strip() or fallback.title
     recipe.main_idea = recipe.main_idea.strip() or _first(profile.ideas + profile.free_notes, fallback.main_idea)
@@ -244,7 +272,7 @@ def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: 
     recipe.image_prompt = recipe.image_prompt.strip() or fallback.image_prompt
     recipe.negative_prompt = recipe.negative_prompt.strip() or fallback.negative_prompt
 
-    if _uses_stock_explanation(recipe.friend_explanation):
+    if _uses_stock_explanation(recipe.friend_explanation) or _sounds_robotic(recipe.friend_explanation):
         recipe.friend_explanation = _personal_connection_explanation(profile, recipe)
 
     chosen_symbol_text = " ".join(profile.symbols).lower()
@@ -265,6 +293,15 @@ def _uses_stock_explanation(text: str) -> bool:
     )
 
 
+def _sounds_robotic(text: str) -> bool:
+    lowered = (text or "").lower()
+    return (
+        "that is the idea behind the painting" in lowered
+        or "this painting turns" in lowered
+        or "the meaning is not hidden" in lowered
+    )
+
+
 def _uses_stock_symbol_set(recipe: ArtRecipe) -> bool:
     visuals = {symbol.visual.lower().strip() for symbol in recipe.symbols[:3]}
     return {"a line", "a door", "a flame"}.issubset(visuals)
@@ -273,6 +310,12 @@ def _uses_stock_symbol_set(recipe: ArtRecipe) -> bool:
 def _symbols_from_profile(profile: InterviewProfile) -> list[Symbol]:
     idea_text = " ".join(profile.ideas + profile.free_notes).lower()
     palette = str(profile.visual_preferences.get("palette_mood", "")).strip()
+    if "rain" in idea_text:
+        return [
+            Symbol(visual="wet pavement light", meaning="joy arriving after the sky opens"),
+            Symbol(visual="small bright ripples", meaning="happiness spreading without needing to shout"),
+            Symbol(visual=f"{palette or 'hushed'} color rain", meaning="the private weather of relief"),
+        ]
     if "lonely" in idea_text or "loneliness" in idea_text or "silence" in idea_text:
         return [
             Symbol(visual="a pale open field", meaning="room around the feeling instead of escape from it"),
@@ -294,22 +337,36 @@ def _symbols_from_profile(profile: InterviewProfile) -> list[Symbol]:
 
 def _personal_connection_explanation(profile: InterviewProfile, recipe: ArtRecipe) -> str:
     idea = _first(profile.ideas + profile.free_notes, recipe.main_idea)
-    chosen = ", ".join(profile.ideas[1:] + profile.free_notes[-3:])
+    chosen_items = [item for item in profile.ideas[1:] + profile.free_notes[-3:] if item != "visual preferences"]
+    chosen = ", ".join(chosen_items)
     palette = str(profile.visual_preferences.get("palette_mood", "")).strip()
+    idea_text = idea.lower()
+    if "rain" in idea_text:
+        detail = chosen or palette or "the softened rhythm"
+        return (
+            f"The rain here feels less like weather and more like permission to brighten. "
+            f"{detail.capitalize()} becomes the point where the painting meets the viewer: a quiet joy that spreads outward, "
+            f"as if the day has just been washed clean."
+        )
+    if "lonely" in idea_text or "loneliness" in idea_text:
+        detail = chosen or palette or "the open space"
+        return (
+            f"This piece does not try to cure loneliness; it gives it a gentle room. "
+            f"{detail.capitalize()} becomes the place where peace can sit beside solitude without needing to explain itself."
+        )
     if chosen:
         return (
-            f"This painting turns {idea.lower()} into something you can stand in front of: "
-            f"{chosen.lower()} become shape, distance, and rhythm. "
-            f"The meaning is not hidden in a symbol; it happens when the image gives that feeling a place to land."
+            f"The painting gives {idea.lower()} a body: {chosen.lower()} become rhythm, distance, and color. "
+            f"It works when the viewer feels those abstract marks answer something they already carried in quietly."
         )
     if palette:
         return (
-            f"This painting connects to {idea.lower()} through {palette}: a color atmosphere that lets the feeling stay quiet "
-            f"without disappearing. Its meaning is the moment the viewer recognizes that mood as their own."
+            f"The {palette} atmosphere lets {idea.lower()} stay quiet without becoming vague. "
+            f"The connection happens when the viewer recognizes the mood before they can name it."
         )
     return (
-        f"This painting gives {idea.lower()} a visible atmosphere. "
-        f"Its meaning is the connection between the person looking and the abstract space that seems to understand them."
+        f"The painting gives {idea.lower()} a place to live outside language. "
+        f"Its meaning arrives when the abstract space feels strangely familiar to the person looking at it."
     )
 
 

@@ -18,6 +18,8 @@ Rules:
 - Use next_need.suggested_component as the control kind unless can_generate is true.
 - Do not copy old questions, deterministic labels, or generic option banks.
 - Do not use any value from atelier_state.already_chosen as a new option.
+- Do not ask questions similar to atelier_state.avoid_questions.
+- Do not use choices similar to atelier_state.avoid_options.
 - Do not repeat the user's prompt inside options.
 - Do not use ellipses or truncated phrases.
 - Make options concrete visual/emotional choices, not explanations.
