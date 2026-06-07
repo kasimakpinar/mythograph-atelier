@@ -15,6 +15,7 @@ from mythograph.config import (
     LLAMACPP_CHAT_FORMAT,
     LLAMACPP_FILENAME,
     LLAMACPP_CHAT_ENABLED,
+    LLAMACPP_FLASH_ATTN,
     LLAMACPP_N_CTX,
     LLAMACPP_N_GPU_LAYERS,
     LLAMACPP_N_THREADS,
@@ -259,6 +260,7 @@ class LlamaCppClient:
             return cls._llm
 
         try:
+            os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
             _preload_cuda_libraries()
             from llama_cpp import Llama
         except ImportError as exc:
@@ -273,6 +275,7 @@ class LlamaCppClient:
             "n_gpu_layers": LLAMACPP_N_GPU_LAYERS,
             "n_threads": LLAMACPP_N_THREADS,
             "verbose": LLAMACPP_VERBOSE,
+            "flash_attn": LLAMACPP_FLASH_ATTN,
         }
         if LLAMACPP_CHAT_FORMAT:
             kwargs["chat_format"] = LLAMACPP_CHAT_FORMAT
@@ -302,6 +305,7 @@ def runtime_status() -> dict[str, Any]:
                 "llamacpp_chat_enabled": LLAMACPP_CHAT_ENABLED,
                 "llamacpp_recipe_enabled": LLAMACPP_RECIPE_ENABLED,
                 "llamacpp_unload_after_call": LLAMACPP_UNLOAD_AFTER_CALL,
+                "llamacpp_flash_attn": LLAMACPP_FLASH_ATTN,
             }
         )
     return status
@@ -384,8 +388,44 @@ def extract_json_object(text: str) -> dict[str, Any]:
     start = stripped.find("{")
     end = stripped.rfind("}")
     if start != -1 and end == -1 and ":" in stripped[start:]:
-        stripped = stripped + "}"
+        stripped = _balance_json_text(stripped[start:])
+        start = 0
         end = len(stripped) - 1
     if start == -1 or end == -1 or end <= start:
         raise ValueError("No JSON object found in model response.")
-    return json.loads(stripped[start : end + 1])
+    candidate = stripped[start : end + 1]
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return json.loads(_balance_json_text(candidate))
+
+
+def _balance_json_text(text: str) -> str:
+    candidate = text.strip()
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for char in candidate:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in {"}", "]"} and stack and stack[-1] == char:
+            stack.pop()
+
+    if in_string:
+        candidate += '"'
+    while stack:
+        candidate += stack.pop()
+    return candidate

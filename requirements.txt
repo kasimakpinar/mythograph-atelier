@@ -10,6 +10,7 @@ spaces>=0.40.0
 --only-binary llama-cpp-python
 llama-cpp-python==0.3.22
 huggingface-hub>=0.34.0
+hf_transfer>=0.1.4
 
 # FLUX.2 Klein image path. The Gradio image callback is the ZeroGPU workload.
 diffusers>=0.36.0

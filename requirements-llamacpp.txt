@@ -9,3 +9,4 @@
 --only-binary llama-cpp-python
 llama-cpp-python==0.3.22
 huggingface-hub>=0.34.0
+hf_transfer>=0.1.4
