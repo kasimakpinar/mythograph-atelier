@@ -4,14 +4,7 @@ from mythograph.config import CONVERSATION_MODE, LLAMACPP_CHAT_ENABLED, LLM_CHAT
 from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn, DynamicControl, SliderSpec
-from mythograph.services.interview import (
-    CONTRAST_OPTIONS,
-    IDEA_OPTIONS,
-    STYLE_OPTIONS,
-    SYMBOL_OPTIONS,
-    new_profile,
-    update_scores,
-)
+from mythograph.services.interview import CONTRAST_OPTIONS, STYLE_OPTIONS, SYMBOL_OPTIONS, new_profile, update_scores
 from mythograph.services.trace_logger import log_event
 
 
@@ -104,14 +97,16 @@ def choose_conversation_turn_with_model(
     started = time.perf_counter()
     payload = {
         "atelier_state": build_atelier_state(profile),
-        "fallback_turn": fallback_turn.model_dump(),
+        "next_need": _next_need_from_turn(fallback_turn),
+        "can_generate": fallback_turn.is_ready,
         "allowed_control_kinds": [kind.value for kind in ControlKind],
-        "available_option_sets": {
-            "ideas": IDEA_OPTIONS,
-            "styles": STYLE_OPTIONS,
-            "symbols": SYMBOL_OPTIONS,
-            "contrasts": CONTRAST_OPTIONS,
-            "palette_moods": PALETTE_OPTIONS,
+        "control_guidance": {
+            "choice_cards": "3-5 fresh, specific options for one choice.",
+            "multi_choice_cards": "3-5 fresh, specific options; user may pick two.",
+            "swatch_picker": "3-5 short palette moods, not repeated from previous turns.",
+            "slider_group": "2-3 visual dials with expressive labels.",
+            "text_refinement": "one short free-text prompt when user intent is vague.",
+            "ready_button": "only when can_generate is true.",
         },
     }
     response = llm.complete_json(
@@ -157,7 +152,8 @@ def choose_conversation_turn_with_model(
             {
                 "invalid_json": response.content,
                 "required_shape": "ConversationTurn JSON with assistant_message, progress_label, reason, is_ready, controls.",
-                "fallback_turn": fallback_turn.model_dump(),
+                "next_need": _next_need_from_turn(fallback_turn),
+                "can_generate": fallback_turn.is_ready,
             },
             max_tokens=LLM_CHAT_MAX_TOKENS,
             response_format={"type": "json_object"},
@@ -278,6 +274,15 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
     }
 
 
+def _next_need_from_turn(turn: ConversationTurn) -> dict:
+    control = turn.controls[0] if turn.controls else None
+    return {
+        "goal": turn.reason,
+        "suggested_component": control.kind.value if control else ControlKind.TEXT_REFINEMENT.value,
+        "profile_ready": turn.is_ready,
+    }
+
+
 def _first_nonempty(items: list[str]) -> str:
     for item in items:
         if item:
@@ -287,12 +292,12 @@ def _first_nonempty(items: list[str]) -> str:
 
 def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: ConversationTurn) -> ConversationTurn:
     if not candidate.controls:
-        candidate.controls = fallback_turn.controls
+        raise ValueError("model response did not include a control")
     candidate.controls = [candidate.controls[0]]
     control = candidate.controls[0]
 
     if candidate.is_ready and not fallback_turn.is_ready:
-        return fallback_turn
+        candidate.is_ready = False
     if fallback_turn.is_ready:
         candidate.is_ready = True
         candidate.controls = [
@@ -306,10 +311,10 @@ def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: Conve
         return candidate
 
     if control.kind == ControlKind.READY_BUTTON:
-        return fallback_turn
+        raise ValueError("model requested ready_button before profile was ready")
 
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
-        control.options = _sanitize_options(control.options, fallback_turn.controls[0].options if fallback_turn.controls else [])
+        control.options = _sanitize_options(control.options)
     elif control.kind == ControlKind.SLIDER_GROUP:
         control.sliders = _sanitize_sliders(control.sliders)
     elif control.kind == ControlKind.TEXT_REFINEMENT:
@@ -317,23 +322,30 @@ def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: Conve
         control.sliders = []
 
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER} and not control.options:
-        return fallback_turn
+        raise ValueError(f"{control.kind.value} needs at least one option")
     if control.kind == ControlKind.SLIDER_GROUP and not control.sliders:
-        return fallback_turn
+        raise ValueError("slider_group needs at least one slider")
     return candidate
 
 
-def _sanitize_options(options: list[str], fallback_options: list[str]) -> list[str]:
+def _sanitize_options(options: list[str]) -> list[str]:
     cleaned: list[str] = []
     for option in options:
-        value = str(option).strip()
+        value = _clean_option_text(str(option).strip())
         if value and value not in cleaned:
             cleaned.append(value)
-        if len(cleaned) >= 6:
+        if len(cleaned) >= 5:
             break
-    if cleaned:
-        return cleaned
-    return fallback_options[:6]
+    return cleaned
+
+
+def _clean_option_text(value: str) -> str:
+    clean = " ".join(value.replace("...", " ").split())
+    if not clean:
+        return ""
+    if len(clean) > 82:
+        clean = clean[:79].rstrip(" ,.;:") + "."
+    return clean
 
 
 def _sanitize_sliders(sliders: list[SliderSpec]) -> list[SliderSpec]:

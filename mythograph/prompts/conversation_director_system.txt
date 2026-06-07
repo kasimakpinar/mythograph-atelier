@@ -9,10 +9,14 @@ Schema:
 Rules:
 - kind must be one allowed kind from user payload.
 - exactly one control.
-- options: 0-5 short strings.
+- options: 0-5 short strings you invent now.
 - sliders: [] except slider_group.
 - slider_group uses 2-3 sliders: {"key":"density","label":"Density","left_label":"minimal","right_label":"rich","value":50}.
 - text_refinement uses options=[] and sliders=[].
-- ready_button only if fallback_turn.is_ready is true; options=["Create artwork"].
-- Use atelier_state for originality.
+- ready_button only if can_generate is true; options=["Create artwork"].
+- Use atelier_state for originality and next_need only for direction.
+- Do not copy old questions, deterministic labels, or generic option banks.
+- Do not repeat the user's prompt inside options.
+- Do not use ellipses or truncated phrases.
+- Make options concrete visual/emotional choices, not explanations.
 - Keep every string short.

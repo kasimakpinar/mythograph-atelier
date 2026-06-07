@@ -15,6 +15,10 @@ class GoodClient:
         assert response_format == {"type": "json_object"}
         assert "atelier_state" in user_payload
         assert "chat_history" not in user_payload
+        assert "fallback_turn" not in user_payload
+        assert "available_option_sets" not in user_payload
+        assert "next_need" in user_payload
+        assert "can_generate" in user_payload
         assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
         return LLMResponse(
             content=json.dumps(
