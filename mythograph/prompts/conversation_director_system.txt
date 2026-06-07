@@ -15,7 +15,9 @@ Rules:
 - text_refinement uses options=[] and sliders=[].
 - ready_button only if can_generate is true; options=["Create artwork"].
 - Use atelier_state for originality and next_need only for direction.
+- Use next_need.suggested_component as the control kind unless can_generate is true.
 - Do not copy old questions, deterministic labels, or generic option banks.
+- Do not use any value from atelier_state.already_chosen as a new option.
 - Do not repeat the user's prompt inside options.
 - Do not use ellipses or truncated phrases.
 - Make options concrete visual/emotional choices, not explanations.

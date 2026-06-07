@@ -145,7 +145,7 @@ def choose_conversation_turn_with_model(
 
     try:
         candidate = ConversationTurn.model_validate(extract_json_object(response.content))
-        candidate = sanitize_conversation_turn(candidate, fallback_turn)
+        candidate = sanitize_conversation_turn(candidate, fallback_turn, profile)
     except Exception as exc:
         repair_response = llm.complete_json(
             _repair_system_prompt(),
@@ -160,7 +160,7 @@ def choose_conversation_turn_with_model(
         )
         try:
             candidate = ConversationTurn.model_validate(extract_json_object(repair_response.content))
-            candidate = sanitize_conversation_turn(candidate, fallback_turn)
+            candidate = sanitize_conversation_turn(candidate, fallback_turn, profile)
         except Exception as repair_exc:
             elapsed_seconds = round(time.perf_counter() - started, 3)
             raw_content = repair_response.content or response.content
@@ -254,6 +254,8 @@ def _repair_system_prompt() -> str:
     return (
         "Return only valid JSON for Mythograph Atelier. No markdown. "
         "Keep one control only. Use allowed kind names exactly. "
+        "Use the suggested_component from next_need unless can_generate is true. "
+        "Do not repeat previous user answers as options. "
         "If unsure, use text_refinement with empty options and sliders."
     )
 
@@ -271,6 +273,7 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
         "answers_so_far": [answer[:180] for answer in answers[-6:]],
         "scores": profile.scores.model_dump(),
         "turn_count": profile.turn_count,
+        "already_chosen": _recent_choices(profile),
     }
 
 
@@ -283,6 +286,12 @@ def _next_need_from_turn(turn: ConversationTurn) -> dict:
     }
 
 
+def _recent_choices(profile: InterviewProfile) -> list[str]:
+    answers = profile.ideas + profile.styles + profile.symbols + profile.contrasts + profile.free_notes
+    answers.extend(str(value) for value in profile.visual_preferences.values() if value not in (None, ""))
+    return [_normalize_text(answer)[:80] for answer in answers[-10:] if _normalize_text(answer)]
+
+
 def _first_nonempty(items: list[str]) -> str:
     for item in items:
         if item:
@@ -290,7 +299,11 @@ def _first_nonempty(items: list[str]) -> str:
     return ""
 
 
-def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: ConversationTurn) -> ConversationTurn:
+def sanitize_conversation_turn(
+    candidate: ConversationTurn,
+    fallback_turn: ConversationTurn,
+    profile: InterviewProfile,
+) -> ConversationTurn:
     if not candidate.controls:
         raise ValueError("model response did not include a control")
     candidate.controls = [candidate.controls[0]]
@@ -313,8 +326,12 @@ def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: Conve
     if control.kind == ControlKind.READY_BUTTON:
         raise ValueError("model requested ready_button before profile was ready")
 
+    expected_kind = _expected_control_kind(fallback_turn)
+    if expected_kind and not _control_kind_matches_stage(control.kind, expected_kind):
+        raise ValueError(f"model chose {control.kind.value}; expected {expected_kind.value} for this stage")
+
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
-        control.options = _sanitize_options(control.options)
+        control.options = _sanitize_options(control.options, _recent_choices(profile))
     elif control.kind == ControlKind.SLIDER_GROUP:
         control.sliders = _sanitize_sliders(control.sliders)
     elif control.kind == ControlKind.TEXT_REFINEMENT:
@@ -328,11 +345,25 @@ def sanitize_conversation_turn(candidate: ConversationTurn, fallback_turn: Conve
     return candidate
 
 
-def _sanitize_options(options: list[str]) -> list[str]:
+def _expected_control_kind(fallback_turn: ConversationTurn) -> ControlKind | None:
+    if not fallback_turn.controls:
+        return None
+    return fallback_turn.controls[0].kind
+
+
+def _control_kind_matches_stage(candidate_kind: ControlKind, expected_kind: ControlKind) -> bool:
+    if candidate_kind == expected_kind:
+        return True
+    meaning_kinds = {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS}
+    return expected_kind in meaning_kinds and candidate_kind in meaning_kinds
+
+
+def _sanitize_options(options: list[str], blocked_options: list[str]) -> list[str]:
     cleaned: list[str] = []
     for option in options:
         value = _clean_option_text(str(option).strip())
-        if value and value not in cleaned:
+        normalized = _normalize_text(value)
+        if value and value not in cleaned and normalized not in blocked_options:
             cleaned.append(value)
         if len(cleaned) >= 5:
             break
@@ -346,6 +377,10 @@ def _clean_option_text(value: str) -> str:
     if len(clean) > 82:
         clean = clean[:79].rstrip(" ,.;:") + "."
     return clean
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(str(value).lower().strip().split())
 
 
 def _sanitize_sliders(sliders: list[SliderSpec]) -> list[SliderSpec]:
@@ -385,7 +420,7 @@ def apply_control_response(profile: InterviewProfile, response: ControlResponse)
         else:
             profile.ideas.extend(values)
     elif response.kind == ControlKind.CHOICE_CARDS:
-        _apply_choice(profile, values[0] if values else "")
+        _apply_choice(profile, values[0] if values else "", response)
     elif response.kind == ControlKind.SLIDER_GROUP:
         profile.visual_preferences.update(response.sliders)
         if "visual preferences" not in profile.free_notes:
@@ -535,7 +570,7 @@ def _apply_free_text(profile: InterviewProfile, text: str) -> None:
     profile.turn_count += 1
 
 
-def _apply_choice(profile: InterviewProfile, value: str) -> None:
+def _apply_choice(profile: InterviewProfile, value: str, response: ControlResponse | None = None) -> None:
     if not value:
         return
     if value in STYLE_OPTIONS:
@@ -546,8 +581,42 @@ def _apply_choice(profile: InterviewProfile, value: str) -> None:
         profile.contrasts.append(value)
     elif value in PALETTE_OPTIONS:
         profile.visual_preferences["palette_mood"] = value
+    elif _looks_like_model_style_choice(profile, response):
+        profile.styles.append(value)
+    elif _looks_like_model_symbol_choice(profile, response):
+        profile.symbols.append(value)
+    elif _looks_like_model_contrast_choice(profile, response):
+        profile.contrasts.append(value)
     else:
         profile.free_notes.append(value)
+
+
+def _looks_like_model_style_choice(profile: InterviewProfile, response: ControlResponse | None) -> bool:
+    if response is None or profile.styles:
+        return False
+    label = _response_context(response)
+    return profile.scores.idea_anchor >= 0.65 and (
+        profile.scores.visual_taste < 0.45
+        or any(word in label for word in ["style", "presence", "mood", "feel", "tone", "texture", "weather"])
+    )
+
+
+def _looks_like_model_symbol_choice(profile: InterviewProfile, response: ControlResponse | None) -> bool:
+    if response is None:
+        return False
+    label = _response_context(response)
+    return any(word in label for word in ["symbol", "anchor", "object", "shape", "image", "motif"])
+
+
+def _looks_like_model_contrast_choice(profile: InterviewProfile, response: ControlResponse | None) -> bool:
+    if response is None:
+        return False
+    label = _response_context(response)
+    return any(word in label for word in ["contrast", "pressure", "edge", "tension"])
+
+
+def _response_context(response: ControlResponse) -> str:
+    return _normalize_text(" ".join(response.values + [response.text]))
 
 
 def _idea_options_for(profile: InterviewProfile) -> list[str]:
