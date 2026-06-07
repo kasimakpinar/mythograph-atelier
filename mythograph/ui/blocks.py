@@ -304,7 +304,7 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
         yield _reset()
         return
     director_history = (history or []) + [_message("user", clean)]
-    yield _thinking_render(_profile(profile_data), director_history, "GPU text model queued: choosing the next question")
+    yield _thinking_render(_profile(profile_data), director_history, "Loading GPU text model...")
     profile_data, turn_data = _advance_conversation_on_gpu(profile_data, clean, None)
     profile = _profile(profile_data)
     turn = _turn(turn_data)
@@ -314,7 +314,7 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
 
 def _submit_starter(profile_data: dict, history: list[dict], text: str):
     director_history = (history or []) + [_message("user", text)]
-    yield _thinking_render(_profile(profile_data), director_history, "GPU text model queued: opening the studio")
+    yield _thinking_render(_profile(profile_data), director_history, "Loading GPU text model...")
     profile_data, turn_data = _advance_conversation_on_gpu(profile_data, text, None)
     profile = _profile(profile_data)
     turn = _turn(turn_data)
@@ -357,7 +357,7 @@ def _submit_swatch(profile_data: dict, history: list[dict], value: str | None):
 
 def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):
     director_history = (history or []) + [_message("user", user_summary)]
-    yield _thinking_render(_profile(profile_data), director_history, "GPU text model queued: adapting the controls")
+    yield _thinking_render(_profile(profile_data), director_history, "Loading GPU text model...")
     profile_data, turn_data = _advance_conversation_on_gpu(profile_data, "", response.model_dump())
     profile = _profile(profile_data)
     turn = _turn(turn_data)
@@ -375,7 +375,7 @@ def _thinking_render(profile: InterviewProfile, history: list[dict], progress_la
             reason="model-assisted turn is running",
             is_ready=False,
         ),
-        activity="llama.cpp is queued for ZeroGPU. The first turn can include model download/load time.",
+        activity="Loading GPU text model...\nThe first reply can take longer while llama.cpp loads the GGUF. Later replies should be faster.",
     )
 
 

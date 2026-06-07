@@ -374,7 +374,7 @@ def _render_completion_prompt(messages: list[dict[str, str]]) -> str:
 
 def extract_json_object(text: str) -> dict[str, Any]:
     stripped = text.strip()
-    if stripped and not stripped.startswith("{") and "{" not in stripped:
+    if stripped and stripped[0] in {"'", '"'} and stripped.count("{") == 0 and ":" in stripped:
         stripped = "{" + stripped
     if stripped.startswith("```"):
         stripped = stripped.strip("`")
@@ -383,6 +383,9 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
     start = stripped.find("{")
     end = stripped.rfind("}")
+    if start != -1 and end == -1 and ":" in stripped[start:]:
+        stripped = stripped + "}"
+        end = len(stripped) - 1
     if start == -1 or end == -1 or end <= start:
         raise ValueError("No JSON object found in model response.")
     return json.loads(stripped[start : end + 1])

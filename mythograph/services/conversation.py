@@ -138,6 +138,7 @@ def choose_conversation_turn_with_model(
                 "error": response.error,
                 "transport_error": response.error,
                 "raw_content": response.content,
+                "raw_preview": _preview(response.content),
                 "used_fallback": False,
                 "retry_count": 0,
                 "chosen_control": error_turn.controls[0].kind if error_turn.controls else None,
@@ -182,6 +183,7 @@ def choose_conversation_turn_with_model(
                     "error": error_text,
                     "transport_error": repair_response.error,
                     "raw_content": raw_content,
+                    "raw_preview": _preview(raw_content),
                     "used_fallback": False,
                     "retry_count": 1,
                     "chosen_control": error_turn.controls[0].kind if error_turn.controls else None,
@@ -200,6 +202,7 @@ def choose_conversation_turn_with_model(
                 "error": str(exc),
                 "transport_error": repair_response.error,
                 "raw_content": repair_response.content,
+                "raw_preview": _preview(repair_response.content),
                 "used_fallback": False,
                 "retry_count": 1,
                 "chosen_control": candidate.controls[0].kind if candidate.controls else None,
@@ -217,6 +220,7 @@ def choose_conversation_turn_with_model(
             "elapsed_seconds": elapsed_seconds,
             "transport_error": response.error,
             "raw_content": response.content,
+            "raw_preview": _preview(response.content),
             "used_fallback": False,
             "retry_count": 0,
             "chosen_control": candidate.controls[0].kind if candidate.controls else None,
@@ -244,6 +248,10 @@ def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
             )
         ],
     )
+
+
+def _preview(text: str, limit: int = 900) -> str:
+    return " ".join((text or "").split())[:limit]
 
 
 def _repair_system_prompt() -> str:
