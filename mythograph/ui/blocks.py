@@ -7,7 +7,7 @@ from mythograph.models.llm_client import LlamaCppClient, preload_llamacpp_if_con
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn
 from mythograph.services.art_recipe import build_art_recipe_with_model
-from mythograph.services.conversation import advance_conversation, new_profile, start_session
+from mythograph.services.conversation import advance_conversation, model_error_turn, new_profile, start_session
 from mythograph.services.trace_logger import export_trace, log_event
 from mythograph.ui.examples import REGENERATION_OPTIONS, STARTER_IDEAS
 
@@ -391,13 +391,26 @@ def _activity_for_turn(turn: ConversationTurn, default: str) -> str:
 
 @spaces.GPU(duration=60)
 def _advance_conversation_on_gpu(profile_data: dict, user_message: str, control_response_data: dict | None):
-    response = ControlResponse.model_validate(control_response_data) if control_response_data else None
-    profile, turn = advance_conversation(
-        _profile(profile_data),
-        user_message=user_message,
-        control_response=response,
-    )
-    return profile.model_dump(), turn.model_dump()
+    profile = _profile(profile_data)
+    try:
+        response = ControlResponse.model_validate(control_response_data) if control_response_data else None
+        profile, turn = advance_conversation(
+            profile,
+            user_message=user_message,
+            control_response=response,
+        )
+        return profile.model_dump(), turn.model_dump()
+    except Exception as exc:
+        log_event(
+            "llm_conversation_turn",
+            {
+                "source": "fallback",
+                "error": f"ZeroGPU llama.cpp turn failed: {exc}",
+                "used_fallback": False,
+                "retry_count": 0,
+            },
+        )
+        return profile.model_dump(), model_error_turn("The GPU text worker failed. Try again once.", str(exc)).model_dump()
 
 
 def _render(
