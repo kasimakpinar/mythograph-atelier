@@ -92,7 +92,7 @@ def build_demo() -> gr.Blocks:
                     multi_submit = gr.Button("Choose", variant="primary")
 
                 with gr.Group(visible=False, elem_classes=["ma-control-group"]) as slider_group:
-                    gr.Markdown("### Tune the visual temperament")
+                    gr.Markdown("### Studio dials")
                     minimal_rich = gr.Slider(0, 100, value=35, step=1, label="minimal to rich")
                     calm_intense = gr.Slider(0, 100, value=45, step=1, label="calm to intense")
                     geometric_organic = gr.Slider(0, 100, value=45, step=1, label="geometric to organic")
@@ -468,9 +468,9 @@ def _render(
         gr.update(visible=kind == ControlKind.MULTI_CHOICE_CARDS),
         gr.update(choices=options, value=[]),
         gr.update(visible=kind == ControlKind.SLIDER_GROUP),
-        gr.update(value=_slider_value(turn, "minimal_rich", 35)),
-        gr.update(value=_slider_value(turn, "calm_intense", 45)),
-        gr.update(value=_slider_value(turn, "geometric_organic", 45)),
+        gr.update(value=_slider_value_at(turn, 0, 35), label=_slider_label_at(turn, 0, "minimal to rich")),
+        gr.update(value=_slider_value_at(turn, 1, 45), label=_slider_label_at(turn, 1, "calm to intense")),
+        gr.update(value=_slider_value_at(turn, 2, 45), label=_slider_label_at(turn, 2, "geometric to organic")),
         gr.update(visible=kind == ControlKind.SWATCH_PICKER),
         gr.update(choices=options, value=None),
         gr.update(visible=kind == ControlKind.TEXT_REFINEMENT),
@@ -497,6 +497,24 @@ def _slider_value(turn: ConversationTurn, key: str, default: int) -> int:
         if slider.key == key:
             return slider.value
     return default
+
+
+def _slider_value_at(turn: ConversationTurn, index: int, default: int) -> int:
+    if not turn.controls or len(turn.controls[0].sliders) <= index:
+        return default
+    return turn.controls[0].sliders[index].value
+
+
+def _slider_label_at(turn: ConversationTurn, index: int, default: str) -> str:
+    if not turn.controls or len(turn.controls[0].sliders) <= index:
+        return default
+    slider = turn.controls[0].sliders[index]
+    label = slider.label.strip() or default
+    left = slider.left_label.strip()
+    right = slider.right_label.strip()
+    if left and right:
+        return f"{label}: {left} to {right}"
+    return label
 
 
 @spaces.GPU(duration=120)

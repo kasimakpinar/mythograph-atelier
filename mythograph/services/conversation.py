@@ -412,6 +412,9 @@ def sanitize_conversation_turn(
         candidate.is_ready = False
     if fallback_turn.is_ready:
         candidate.is_ready = True
+        candidate.assistant_message = _ready_message(profile)
+        candidate.progress_label = "Ready: create the painting"
+        candidate.reason = "profile has enough personal signal for generation"
         candidate.controls = [
             DynamicControl(
                 kind=ControlKind.READY_BUTTON,
@@ -430,7 +433,7 @@ def sanitize_conversation_turn(
         raise ValueError(f"model chose {control.kind.value}; expected {expected_kind.value} for this stage")
 
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
-        control.options = _sanitize_options(control.options, _recent_choices(profile))
+        control.options = _sanitize_options(control.options, _recent_choices(profile), profile)
     elif control.kind == ControlKind.SLIDER_GROUP:
         control.sliders = _sanitize_sliders(control.sliders)
     elif control.kind == ControlKind.TEXT_REFINEMENT:
@@ -442,6 +445,12 @@ def sanitize_conversation_turn(
     if control.kind == ControlKind.SLIDER_GROUP and not control.sliders:
         raise ValueError("slider_group needs at least one slider")
     return candidate
+
+
+def _ready_message(profile: InterviewProfile) -> str:
+    idea = _first_nonempty(profile.ideas + profile.free_notes)
+    fragment = _short_fragment(idea) if idea else "this feeling"
+    return f"I have enough to make {fragment} visible as an abstract painting."
 
 
 def _expected_control_kind(fallback_turn: ConversationTurn) -> ControlKind | None:
@@ -457,7 +466,7 @@ def _control_kind_matches_stage(candidate_kind: ControlKind, expected_kind: Cont
     return expected_kind in meaning_kinds and candidate_kind in meaning_kinds
 
 
-def _sanitize_options(options: list[str], blocked_options: list[str]) -> list[str]:
+def _sanitize_options(options: list[str], blocked_options: list[str], profile: InterviewProfile) -> list[str]:
     cleaned: list[str] = []
     for option in options:
         value = _clean_option_text(str(option).strip())
@@ -466,7 +475,30 @@ def _sanitize_options(options: list[str], blocked_options: list[str]) -> list[st
             cleaned.append(value)
         if len(cleaned) >= 5:
             break
+    if len(cleaned) < 2:
+        for option in _companion_options(profile, cleaned):
+            normalized = _normalize_text(option)
+            if normalized not in blocked_options and option not in cleaned:
+                cleaned.append(option)
+            if len(cleaned) >= 3:
+                break
     return cleaned
+
+
+def _companion_options(profile: InterviewProfile, existing: list[str]) -> list[str]:
+    idea = _normalize_text(_first_nonempty(profile.ideas + profile.free_notes))
+    if "lonely" in idea or "loneliness" in idea or "silence" in idea:
+        return ["a private echo", "a held breath", "a small warm distance", "an open room"]
+    if "positive" in idea or "hope" in idea:
+        return ["a small glow", "a rising edge", "a clear morning mark", "a brave softness"]
+    if "chaos" in idea:
+        return ["a quiet center", "a broken rhythm", "a path through noise", "a bright interruption"]
+    return [
+        *(existing or []),
+        "a hidden second voice",
+        "a quiet counterweight",
+        "something unnamed",
+    ]
 
 
 def _clean_option_text(value: str) -> str:
@@ -501,6 +533,16 @@ def _sanitize_sliders(sliders: list[SliderSpec]) -> list[SliderSpec]:
         )
         if len(cleaned) >= 3:
             break
+    companion_dials = [
+        SliderSpec(key="space", label="Space", left_label="close", right_label="open", value=50),
+        SliderSpec(key="rhythm", label="Rhythm", left_label="still", right_label="moving", value=45),
+        SliderSpec(key="edge", label="Edge", left_label="soft", right_label="sharp", value=55),
+    ]
+    for slider in companion_dials:
+        if len(cleaned) >= 3:
+            break
+        if all(existing.key != slider.key for existing in cleaned):
+            cleaned.append(slider)
     return cleaned
 
 

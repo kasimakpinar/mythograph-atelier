@@ -115,7 +115,18 @@ def build_art_recipe_with_model(
         {
             "profile": profile.model_dump(),
             "regeneration_instruction": regeneration_instruction,
-            "fallback_recipe": fallback.model_dump(),
+            "connection_principle": "The meaning is the connection between this person and the abstract painting.",
+            "required_shape": {
+                "title": "string",
+                "main_idea": "string",
+                "visual_style": "string",
+                "palette": ["#hex", "#hex", "#hex"],
+                "symbols": [{"visual": "specific abstract visual", "meaning": "personal connection"}],
+                "composition": "string",
+                "image_prompt": "string",
+                "negative_prompt": "string",
+                "friend_explanation": "short personal explanation",
+            },
         },
         max_tokens=LLM_RECIPE_MAX_TOKENS,
         response_format={"type": "json_object"},
@@ -152,6 +163,7 @@ def build_art_recipe_with_model(
 
     try:
         recipe = ArtRecipe.model_validate(extract_json_object(response.content))
+        recipe = _personalize_recipe(recipe, profile, fallback)
     except Exception as exc:
         repair_response = llm.complete_json(
             _repair_recipe_prompt(),
@@ -164,6 +176,7 @@ def build_art_recipe_with_model(
         )
         try:
             recipe = ArtRecipe.model_validate(extract_json_object(repair_response.content))
+            recipe = _personalize_recipe(recipe, profile, fallback)
         except Exception as repair_exc:
             error_text = f"{exc}; repair failed: {repair_exc}"
             if repair_response.error:
@@ -218,7 +231,85 @@ def _repair_recipe_prompt() -> str:
         "Return only valid JSON for an ArtRecipe. No markdown. "
         "Required keys: title, main_idea, visual_style, palette, symbols, composition, "
         "image_prompt, negative_prompt, friend_explanation. "
-        "symbols must be objects with visual and meaning."
+        "symbols must be objects with visual and meaning. "
+        "Do not use the phrase 'is not decoration'."
+    )
+
+
+def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: ArtRecipe) -> ArtRecipe:
+    recipe.title = recipe.title.strip() or fallback.title
+    recipe.main_idea = recipe.main_idea.strip() or _first(profile.ideas + profile.free_notes, fallback.main_idea)
+    recipe.visual_style = recipe.visual_style.strip() or fallback.visual_style
+    recipe.composition = recipe.composition.strip() or fallback.composition
+    recipe.image_prompt = recipe.image_prompt.strip() or fallback.image_prompt
+    recipe.negative_prompt = recipe.negative_prompt.strip() or fallback.negative_prompt
+
+    if _uses_stock_explanation(recipe.friend_explanation):
+        recipe.friend_explanation = _personal_connection_explanation(profile, recipe)
+
+    chosen_symbol_text = " ".join(profile.symbols).lower()
+    if not chosen_symbol_text and _uses_stock_symbol_set(recipe):
+        recipe.symbols = _symbols_from_profile(profile)
+
+    if "no text" not in recipe.image_prompt.lower():
+        recipe.image_prompt = f"{recipe.image_prompt}, no text, no letters, no signature, no watermark"
+    return recipe
+
+
+def _uses_stock_explanation(text: str) -> bool:
+    lowered = (text or "").lower()
+    return (
+        "is not decoration" in lowered
+        or "a door gives it a second force" in lowered
+        or "threshold into change" in lowered
+    )
+
+
+def _uses_stock_symbol_set(recipe: ArtRecipe) -> bool:
+    visuals = {symbol.visual.lower().strip() for symbol in recipe.symbols[:3]}
+    return {"a line", "a door", "a flame"}.issubset(visuals)
+
+
+def _symbols_from_profile(profile: InterviewProfile) -> list[Symbol]:
+    idea_text = " ".join(profile.ideas + profile.free_notes).lower()
+    palette = str(profile.visual_preferences.get("palette_mood", "")).strip()
+    if "lonely" in idea_text or "loneliness" in idea_text or "silence" in idea_text:
+        return [
+            Symbol(visual="a pale open field", meaning="room around the feeling instead of escape from it"),
+            Symbol(visual="a small echoing mark", meaning="the self answering back softly"),
+            Symbol(visual=f"{palette or 'soft'} color hush", meaning="peace arriving as atmosphere, not explanation"),
+        ]
+    if "positive" in idea_text or "hope" in idea_text:
+        return [
+            Symbol(visual="a rising warm mark", meaning="hope becoming visible before it becomes loud"),
+            Symbol(visual="a clear gap of light", meaning="space for the next good thing"),
+            Symbol(visual=f"{palette or 'bright'} pulse", meaning="optimism held in color"),
+        ]
+    return [
+        Symbol(visual="an open field", meaning="the viewer's private room inside the painting"),
+        Symbol(visual="one recurring mark", meaning="the thought that keeps returning"),
+        Symbol(visual=f"{palette or 'chosen'} color pressure", meaning="emotion translated into atmosphere"),
+    ]
+
+
+def _personal_connection_explanation(profile: InterviewProfile, recipe: ArtRecipe) -> str:
+    idea = _first(profile.ideas + profile.free_notes, recipe.main_idea)
+    chosen = ", ".join(profile.ideas[1:] + profile.free_notes[-3:])
+    palette = str(profile.visual_preferences.get("palette_mood", "")).strip()
+    if chosen:
+        return (
+            f"This painting turns {idea.lower()} into something you can stand in front of: "
+            f"{chosen.lower()} become shape, distance, and rhythm. "
+            f"The meaning is not hidden in a symbol; it happens when the image gives that feeling a place to land."
+        )
+    if palette:
+        return (
+            f"This painting connects to {idea.lower()} through {palette}: a color atmosphere that lets the feeling stay quiet "
+            f"without disappearing. Its meaning is the moment the viewer recognizes that mood as their own."
+        )
+    return (
+        f"This painting gives {idea.lower()} a visible atmosphere. "
+        f"Its meaning is the connection between the person looking and the abstract space that seems to understand them."
     )
 
 

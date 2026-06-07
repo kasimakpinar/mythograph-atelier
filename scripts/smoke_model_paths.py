@@ -27,6 +27,8 @@ class FakeClient:
             )
         assert max_tokens == LLM_RECIPE_MAX_TOKENS
         assert response_format == {"type": "json_object"}
+        assert "fallback_recipe" not in user_payload
+        assert "connection_principle" in user_payload
         return LLMResponse(
             content=json.dumps(
                 {
@@ -42,7 +44,10 @@ class FakeClient:
                     "composition": "balanced abstract composition",
                     "image_prompt": "Abstract painting, no text, no watermark",
                     "negative_prompt": "text, letters, watermark",
-                    "friend_explanation": "A line carries direction through change.",
+                    "friend_explanation": (
+                        "A line is not decoration; it is inner direction. "
+                        "A door gives it a second force: a threshold into change."
+                    ),
                 }
             ),
             source="local",
@@ -51,8 +56,10 @@ class FakeClient:
 
 def main() -> None:
     profile = new_profile()
+    profile.ideas.append("I want something about the peace in loneliness")
     next_ui = choose_next_ui_with_model(profile, FakeClient())
     recipe = build_art_recipe_with_model(profile, client=FakeClient())
+    assert "is not decoration" not in recipe.friend_explanation.lower()
     print(next_ui.next_action)
     print(recipe.title)
 

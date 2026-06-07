@@ -22,5 +22,10 @@ Rules:
 - Preserve the user's own words and emotional intent in main_idea and friend_explanation, but transform them into concise art language.
 - Treat user-provided ideas, symbols, palette mood, and visual preferences as stronger evidence than fallback defaults.
 - The friend_explanation must be short, memorable, and easy to say to a friend.
+- The meaning is the connection between a person and an abstract painting.
+- Explain why this specific person might feel connected to this specific abstract image.
+- Do not use stock symbols unless the user chose them.
+- Do not use the phrase "is not decoration".
+- Avoid generic line, door, flame explanations unless those symbols came from the profile.
 - Do not diagnose or therapize the user.
 - Do not include text, letters, signatures, or watermarks in the image prompt.
