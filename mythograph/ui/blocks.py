@@ -51,8 +51,8 @@ def build_demo() -> gr.Blocks:
             start_prompt = gr.Textbox(
                 label="",
                 placeholder="I want something about ambition, patience, and becoming stronger slowly.",
-                lines=3,
-                max_lines=6,
+                lines=1,
+                max_lines=1,
                 elem_id="ma-start-input",
                 show_label=False,
             )
@@ -118,7 +118,7 @@ def build_demo() -> gr.Blocks:
                     label="",
                     placeholder="Add a thought, correction, symbol, or mood...",
                     lines=1,
-                    max_lines=4,
+                    max_lines=1,
                     show_label=False,
                     scale=5,
                 )
@@ -213,9 +213,10 @@ def build_demo() -> gr.Blocks:
         )
 
         for button, (_title, text) in zip(starter_buttons, STARTER_CHIPS, strict=True):
+            starter_text_state = gr.State(text)
             button.click(
-                fn=lambda profile, history, starter_text=text: _submit_starter(profile, history, starter_text),
-                inputs=[profile_state, chat_history_state],
+                fn=_submit_starter,
+                inputs=[profile_state, chat_history_state, starter_text_state],
                 outputs=flow_outputs,
             )
 
@@ -297,29 +298,32 @@ def _message(role: str, content: str) -> dict[str, str]:
 def _submit_text(profile_data: dict, history: list[dict], text: str):
     clean = (text or "").strip()
     if not clean:
-        return _reset()
+        yield _reset()
+        return
     director_history = (history or []) + [_message("user", clean)]
+    yield _thinking_render(_profile(profile_data), director_history, "Thinking: CPU art director is choosing the next question")
     profile, turn = advance_conversation(_profile(profile_data), user_message=clean)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    return _render(profile, chat, turn)
+    yield _render(profile, chat, turn)
 
 
 def _submit_starter(profile_data: dict, history: list[dict], text: str):
     director_history = (history or []) + [_message("user", text)]
+    yield _thinking_render(_profile(profile_data), director_history, "Thinking: CPU art director is opening the studio")
     profile, turn = advance_conversation(_profile(profile_data), user_message=text)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    return _render(profile, chat, turn)
+    yield _render(profile, chat, turn)
 
 
 def _submit_choice(profile_data: dict, history: list[dict], value: str | None):
     response = ControlResponse(kind=ControlKind.CHOICE_CARDS, values=[value] if value else [])
-    return _submit_control(profile_data, history, response, value or "I am not sure yet.")
+    yield from _submit_control(profile_data, history, response, value or "I am not sure yet.")
 
 
 def _submit_multi(profile_data: dict, history: list[dict], values: list[str] | None):
     chosen = values or []
     response = ControlResponse(kind=ControlKind.MULTI_CHOICE_CARDS, values=chosen)
-    return _submit_control(profile_data, history, response, " | ".join(chosen) if chosen else "I am not sure yet.")
+    yield from _submit_control(profile_data, history, response, " | ".join(chosen) if chosen else "I am not sure yet.")
 
 
 def _submit_sliders(
@@ -336,19 +340,34 @@ def _submit_sliders(
     }
     response = ControlResponse(kind=ControlKind.SLIDER_GROUP, sliders=sliders)
     summary = f"Density {minimal_rich:.0f}, energy {calm_intense:.0f}, shape {geometric_organic:.0f}."
-    return _submit_control(profile_data, history, response, summary)
+    yield from _submit_control(profile_data, history, response, summary)
 
 
 def _submit_swatch(profile_data: dict, history: list[dict], value: str | None):
     response = ControlResponse(kind=ControlKind.SWATCH_PICKER, values=[value] if value else [])
-    return _submit_control(profile_data, history, response, value or "Surprise me.")
+    yield from _submit_control(profile_data, history, response, value or "Surprise me.")
 
 
 def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):
     director_history = (history or []) + [_message("user", user_summary)]
+    yield _thinking_render(_profile(profile_data), director_history, "Thinking: CPU art director is adapting the controls")
     profile, turn = advance_conversation(_profile(profile_data), control_response=response)
     chat = director_history + [_message("assistant", turn.assistant_message)]
-    return _render(profile, chat, turn)
+    yield _render(profile, chat, turn)
+
+
+def _thinking_render(profile: InterviewProfile, history: list[dict], progress_label: str):
+    return _render(
+        profile,
+        history,
+        ConversationTurn(
+            assistant_message=progress_label,
+            progress_label=progress_label,
+            reason="model-assisted turn is running",
+            is_ready=False,
+        ),
+        activity="llama.cpp is running on CPU/RAM. The first turn can include model download/load time.",
+    )
 
 
 def _render(

@@ -60,7 +60,7 @@ MYTHOGRAPH_LLAMACPP_FILENAME=NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf
 MYTHOGRAPH_LLAMACPP_N_CTX=2048
 MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=0
 MYTHOGRAPH_LLAMACPP_N_THREADS=2
-MYTHOGRAPH_LLAMACPP_PRELOAD=1
+MYTHOGRAPH_LLAMACPP_PRELOAD=0
 MYTHOGRAPH_LLM_CHAT_MAX_TOKENS=140
 MYTHOGRAPH_LLM_RECIPE_MAX_TOKENS=360
 MYTHOGRAPH_LLM_TEMPERATURE=0.55
@@ -74,7 +74,7 @@ MYTHOGRAPH_IMAGE_DTYPE=float16
 MYTHOGRAPH_IMAGE_CPU_OFFLOAD=1
 ```
 
-The text model is loaded in CPU/RAM. ZeroGPU should only be consumed by the FLUX image callback.
+The text model runs in CPU/RAM and lazy-loads on the first model-assisted turn. ZeroGPU should only be consumed by the FLUX image callback.
 
 ## Model Architecture
 
