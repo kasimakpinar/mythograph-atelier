@@ -37,6 +37,9 @@
 #ma-chat-panel {
   max-width: 1180px;
   margin: 0 auto;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
 #ma-start-panel {
@@ -91,7 +94,7 @@
 }
 
 #ma-start-input textarea {
-  min-height: 118px !important;
+  min-height: 56px !important;
   padding: 20px !important;
   font-size: 1.07rem !important;
 }
@@ -136,6 +139,16 @@ button.ma-chip {
   border: 0 !important;
   background: rgba(244, 239, 229, 0.28) !important;
   box-shadow: none !important;
+  height: 430px !important;
+  max-height: 430px !important;
+  overflow: hidden !important;
+}
+
+#ma-chatbot .wrap,
+#ma-chatbot .chatbot,
+#ma-chatbot [role="log"] {
+  max-height: 430px !important;
+  overflow-y: auto !important;
 }
 
 #ma-chatbot .message {

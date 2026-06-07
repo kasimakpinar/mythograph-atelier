@@ -2,7 +2,7 @@ import time
 
 from mythograph.schemas.art_recipe import ArtRecipe, Symbol
 from mythograph.schemas.profile import InterviewProfile
-from mythograph.config import LLM_RECIPE_MAX_TOKENS, ROOT_DIR
+from mythograph.config import LLAMACPP_RECIPE_ENABLED, LLM_RECIPE_MAX_TOKENS, ROOT_DIR
 from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.services.trace_logger import log_event
 
@@ -95,6 +95,19 @@ def build_art_recipe_with_model(
 ) -> ArtRecipe:
     fallback = build_art_recipe(profile, regeneration_instruction)
     llm = client or LLMClient()
+    if getattr(llm, "mode", "") == "llamacpp" and not LLAMACPP_RECIPE_ENABLED:
+        log_event(
+            "llm_art_recipe",
+            {
+                "source": "deterministic",
+                "elapsed_seconds": 0,
+                "used_fallback": True,
+                "skip_reason": "llama.cpp recipe disabled for fast MVP generation",
+                "recipe": fallback.model_dump(),
+            },
+        )
+        return fallback
+
     system_prompt = (ROOT_DIR / "mythograph" / "prompts" / "art_recipe_system.txt").read_text(encoding="utf-8")
     started = time.perf_counter()
     response = llm.complete_json(

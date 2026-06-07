@@ -61,10 +61,12 @@ MYTHOGRAPH_LLAMACPP_N_CTX=2048
 MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=0
 MYTHOGRAPH_LLAMACPP_N_THREADS=2
 MYTHOGRAPH_LLAMACPP_PRELOAD=0
-MYTHOGRAPH_LLM_CHAT_MAX_TOKENS=140
-MYTHOGRAPH_LLM_RECIPE_MAX_TOKENS=360
+MYTHOGRAPH_LLAMACPP_CHAT_ENABLED=0
+MYTHOGRAPH_LLAMACPP_RECIPE_ENABLED=0
+MYTHOGRAPH_LLM_CHAT_MAX_TOKENS=64
+MYTHOGRAPH_LLM_RECIPE_MAX_TOKENS=220
 MYTHOGRAPH_LLM_TEMPERATURE=0.55
-MYTHOGRAPH_CONVERSATION_MODE=model_assisted
+MYTHOGRAPH_CONVERSATION_MODE=deterministic
 MYTHOGRAPH_IMAGE_MODE=flux
 MYTHOGRAPH_IMAGE_MODEL_ID=black-forest-labs/FLUX.2-klein-4B
 MYTHOGRAPH_IMAGE_WIDTH=1024
@@ -74,7 +76,7 @@ MYTHOGRAPH_IMAGE_DTYPE=float16
 MYTHOGRAPH_IMAGE_CPU_OFFLOAD=1
 ```
 
-The text model runs in CPU/RAM and lazy-loads on the first model-assisted turn. ZeroGPU should only be consumed by the FLUX image callback.
+The default MVP path keeps chat and recipe construction fast with local adaptive logic. The llama.cpp runtime remains available behind `MYTHOGRAPH_LLAMACPP_CHAT_ENABLED=1` and `MYTHOGRAPH_LLAMACPP_RECIPE_ENABLED=1` for proof experiments, but those calls can be slow on CPU. ZeroGPU should only be consumed by the FLUX image callback.
 
 ## Model Architecture
 
@@ -105,13 +107,12 @@ If FLUX fails to load or generate, the app falls back to Pillow and records the 
 
 ## Trace Proof
 
-For a successful no-API run, the downloaded trace should show:
+For a successful fast MVP run, the downloaded trace should show:
 
 ```text
-llm_conversation_turn.source = llamacpp
-llm_conversation_turn.used_fallback = false
-llm_art_recipe.source = llamacpp
-llm_art_recipe.used_fallback = false
+llm_conversation_turn.source = deterministic
+llm_conversation_turn.skip_reason = llama.cpp chat disabled for fast interactive turns
+llm_art_recipe.source = deterministic
 image_generation.source = flux_klein
 ```
 

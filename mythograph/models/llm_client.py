@@ -12,10 +12,12 @@ from typing import Any
 from mythograph.config import (
     LLAMACPP_CHAT_FORMAT,
     LLAMACPP_FILENAME,
+    LLAMACPP_CHAT_ENABLED,
     LLAMACPP_N_CTX,
     LLAMACPP_N_GPU_LAYERS,
     LLAMACPP_N_THREADS,
     LLAMACPP_PRELOAD,
+    LLAMACPP_RECIPE_ENABLED,
     LLAMACPP_REPO_ID,
     LLAMACPP_VERBOSE,
     LLM_BASE_URL,
@@ -167,6 +169,8 @@ def runtime_status() -> dict[str, Any]:
                 "llamacpp_n_gpu_layers": LLAMACPP_N_GPU_LAYERS,
                 "llamacpp_n_threads": LLAMACPP_N_THREADS,
                 "llamacpp_preload": LLAMACPP_PRELOAD,
+                "llamacpp_chat_enabled": LLAMACPP_CHAT_ENABLED,
+                "llamacpp_recipe_enabled": LLAMACPP_RECIPE_ENABLED,
             }
         )
     return status

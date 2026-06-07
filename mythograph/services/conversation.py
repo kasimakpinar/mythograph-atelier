@@ -1,6 +1,6 @@
 import time
 
-from mythograph.config import CONVERSATION_MODE, LLM_CHAT_MAX_TOKENS, ROOT_DIR
+from mythograph.config import CONVERSATION_MODE, LLAMACPP_CHAT_ENABLED, LLM_CHAT_MAX_TOKENS, ROOT_DIR
 from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn, DynamicControl, SliderSpec
@@ -84,6 +84,20 @@ def choose_conversation_turn_with_model(
         return fallback_turn
 
     llm = client or LLMClient()
+    if getattr(llm, "mode", "") == "llamacpp" and not LLAMACPP_CHAT_ENABLED:
+        log_event(
+            "llm_conversation_turn",
+            {
+                "source": "deterministic",
+                "elapsed_seconds": 0,
+                "used_fallback": True,
+                "skip_reason": "llama.cpp chat disabled for fast interactive turns",
+                "atelier_state": build_atelier_state(profile),
+                "turn": fallback_turn.model_dump(),
+            },
+        )
+        return fallback_turn
+
     system_prompt = (ROOT_DIR / "mythograph" / "prompts" / "conversation_director_system.txt").read_text(
         encoding="utf-8"
     )
@@ -296,10 +310,12 @@ def apply_control_response(profile: InterviewProfile, response: ControlResponse)
 
 def choose_conversation_turn(profile: InterviewProfile) -> ConversationTurn:
     profile = update_scores(profile)
+    idea = _first_nonempty(profile.ideas + profile.free_notes)
+    idea_fragment = _short_fragment(idea)
 
     if profile.scores.ready_to_generate:
         return ConversationTurn(
-            assistant_message="I have enough: a meaning, a visual taste, and symbols. I can paint it now.",
+            assistant_message=f"I have enough to paint {idea_fragment or 'this private myth'} now.",
             progress_label="Ready: meaning, taste, and symbols are locked",
             reason="profile has enough signal for generation",
             is_ready=True,
@@ -315,7 +331,7 @@ def choose_conversation_turn(profile: InterviewProfile) -> ConversationTurn:
 
     if profile.scores.idea_anchor < 0.65:
         return ConversationTurn(
-            assistant_message="Good. Choose the idea that should sit closest to the center of the painting.",
+            assistant_message=f"Good. What kind of order should {idea_fragment or 'this'} reveal?",
             progress_label="Meaning: choose the core pressure",
             reason="idea anchor needs one more signal",
             controls=[
@@ -323,7 +339,7 @@ def choose_conversation_turn(profile: InterviewProfile) -> ConversationTurn:
                     kind=ControlKind.MULTI_CHOICE_CARDS,
                     label="Core meaning",
                     prompt="Pick one or two.",
-                    options=IDEA_OPTIONS,
+                    options=_idea_options_for(profile),
                 )
             ],
         )
@@ -349,7 +365,7 @@ def choose_conversation_turn(profile: InterviewProfile) -> ConversationTurn:
 
     if "palette_mood" not in profile.visual_preferences:
         return ConversationTurn(
-            assistant_message="Pick a color weather for the piece. This does not lock exact colors; it gives the model a mood.",
+            assistant_message=f"Pick the color weather around {idea_fragment or 'the central feeling'}.",
             progress_label="Taste: choose color weather",
             reason="palette mood is missing",
             controls=[
@@ -364,7 +380,7 @@ def choose_conversation_turn(profile: InterviewProfile) -> ConversationTurn:
 
     if not profile.styles:
         return ConversationTurn(
-            assistant_message="Which presence should the artwork have when someone first sees it?",
+            assistant_message=f"When someone first sees {idea_fragment or 'the work'}, what presence should it have?",
             progress_label="Taste: choose the artwork presence",
             reason="style language is missing",
             controls=[
@@ -379,7 +395,7 @@ def choose_conversation_turn(profile: InterviewProfile) -> ConversationTurn:
 
     if profile.scores.symbolic_material < 0.55:
         return ConversationTurn(
-            assistant_message="Give me one symbol to transform. It can stay abstract, but it needs a visual anchor.",
+            assistant_message=f"Choose one visual anchor that can carry {idea_fragment or 'the meaning'}.",
             progress_label="Symbol: choose the anchor",
             reason="symbolic material needs a stronger anchor",
             controls=[
@@ -393,7 +409,7 @@ def choose_conversation_turn(profile: InterviewProfile) -> ConversationTurn:
         )
 
     return ConversationTurn(
-        assistant_message="One last pressure point: should the painting comfort you, challenge you, or surprise you?",
+        assistant_message=f"One last pressure point: how should {idea_fragment or 'the painting'} treat the viewer?",
         progress_label="Readiness: sharpen the emotional angle",
         reason="contrast can sharpen the final recipe",
         controls=[
@@ -428,3 +444,26 @@ def _apply_choice(profile: InterviewProfile, value: str) -> None:
         profile.visual_preferences["palette_mood"] = value
     else:
         profile.free_notes.append(value)
+
+
+def _idea_options_for(profile: InterviewProfile) -> list[str]:
+    idea = _first_nonempty(profile.ideas)
+    if not idea:
+        return IDEA_OPTIONS
+    fragment = _short_fragment(idea)
+    return [
+        f"{fragment} has a hidden structure.",
+        f"{fragment} is a calm center inside pressure.",
+        f"{fragment} becomes visible only through contrast.",
+        f"{fragment} needs one clear path through noise.",
+        "Let the painting find the order by surprise.",
+    ]
+
+
+def _short_fragment(text: str) -> str:
+    clean = " ".join((text or "").strip().split())
+    if not clean:
+        return ""
+    if len(clean) <= 44:
+        return clean
+    return clean[:41].rstrip(" ,.;:") + "..."
