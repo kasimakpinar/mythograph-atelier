@@ -131,56 +131,18 @@ class LlamaCppClient:
         started = time.perf_counter()
         try:
             llm = self._load()
-            kwargs: dict[str, Any] = {
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
-                ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-            if response_format:
-                kwargs["response_format"] = response_format
-            raw = llm.create_chat_completion(**kwargs)
-            content = raw["choices"][0]["message"]["content"]
-            return LLMResponse(
-                content=content,
-                source="llamacpp",
-                raw=raw,
-                elapsed_seconds=round(time.perf_counter() - started, 3),
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
+            ]
+            return self._complete_with_fallbacks(
+                llm=llm,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                response_format=response_format,
+                started=started,
             )
-        except TypeError as exc:
-            if not response_format:
-                return LLMResponse(
-                    content="",
-                    source="fallback",
-                    error=f"llama.cpp unavailable: {exc}",
-                    elapsed_seconds=round(time.perf_counter() - started, 3),
-                )
-            try:
-                llm = self._load()
-                raw = llm.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
-                    ],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                content = raw["choices"][0]["message"]["content"]
-                return LLMResponse(
-                    content=content,
-                    source="llamacpp",
-                    raw=raw,
-                    elapsed_seconds=round(time.perf_counter() - started, 3),
-                )
-            except Exception as fallback_exc:
-                return LLMResponse(
-                    content="",
-                    source="fallback",
-                    error=f"llama.cpp unavailable: {fallback_exc}",
-                    elapsed_seconds=round(time.perf_counter() - started, 3),
-                )
         except Exception as exc:
             return LLMResponse(
                 content="",
@@ -203,50 +165,14 @@ class LlamaCppClient:
         started = time.perf_counter()
         try:
             llm = cls._load()
-            kwargs: dict[str, Any] = {
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-            if response_format:
-                kwargs["response_format"] = response_format
-            raw = llm.create_chat_completion(**kwargs)
-            content = raw["choices"][0]["message"]["content"]
-            return LLMResponse(
-                content=content,
-                source="llamacpp",
-                raw=raw,
-                elapsed_seconds=round(time.perf_counter() - started, 3),
+            return cls._complete_with_fallbacks(
+                llm=llm,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                response_format=response_format,
+                started=started,
             )
-        except TypeError as exc:
-            if not response_format:
-                return LLMResponse(
-                    content="",
-                    source="fallback",
-                    error=f"llama.cpp unavailable: {exc}",
-                    elapsed_seconds=round(time.perf_counter() - started, 3),
-                )
-            try:
-                llm = cls._load()
-                raw = llm.create_chat_completion(
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                content = raw["choices"][0]["message"]["content"]
-                return LLMResponse(
-                    content=content,
-                    source="llamacpp",
-                    raw=raw,
-                    elapsed_seconds=round(time.perf_counter() - started, 3),
-                )
-            except Exception as fallback_exc:
-                return LLMResponse(
-                    content="",
-                    source="fallback",
-                    error=f"llama.cpp unavailable: {fallback_exc}",
-                    elapsed_seconds=round(time.perf_counter() - started, 3),
-                )
         except Exception as exc:
             return LLMResponse(
                 content="",
@@ -257,6 +183,62 @@ class LlamaCppClient:
         finally:
             if LLAMACPP_UNLOAD_AFTER_CALL:
                 cls.unload()
+
+    @staticmethod
+    def _complete_with_fallbacks(
+        llm: Any,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+        response_format: dict[str, str] | None,
+        started: float,
+    ) -> LLMResponse:
+        errors: list[str] = []
+        chat_kwargs: dict[str, Any] = {
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if response_format:
+            chat_kwargs["response_format"] = response_format
+
+        for kwargs in (chat_kwargs, {key: value for key, value in chat_kwargs.items() if key != "response_format"}):
+            try:
+                raw = llm.create_chat_completion(**kwargs)
+                content = raw["choices"][0]["message"]["content"]
+                return LLMResponse(
+                    content=content,
+                    source="llamacpp",
+                    raw=raw,
+                    elapsed_seconds=round(time.perf_counter() - started, 3),
+                )
+            except Exception as exc:
+                errors.append(f"chat_completion: {exc}")
+
+        try:
+            prompt = _render_completion_prompt(messages)
+            raw = llm.create_completion(
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop=["\n\nUser payload:", "\n\nSystem:", "<|end|>"],
+            )
+            content = raw["choices"][0]["text"]
+            return LLMResponse(
+                content=content,
+                source="llamacpp",
+                raw=raw,
+                elapsed_seconds=round(time.perf_counter() - started, 3),
+            )
+        except Exception as exc:
+            errors.append(f"completion: {exc}")
+
+        return LLMResponse(
+            content="",
+            source="fallback",
+            error="; ".join(errors),
+            elapsed_seconds=round(time.perf_counter() - started, 3),
+        )
 
     @classmethod
     def unload(cls) -> None:
@@ -380,8 +362,20 @@ def _cuda_library_dirs() -> list[Path]:
     return library_dirs
 
 
+def _render_completion_prompt(messages: list[dict[str, str]]) -> str:
+    system = "\n".join(message["content"] for message in messages if message["role"] == "system")
+    user = "\n".join(message["content"] for message in messages if message["role"] == "user")
+    return (
+        f"System:\n{system}\n\n"
+        f"User payload:\n{user}\n\n"
+        "Assistant JSON only. Start with { and end with }.\n{"
+    )
+
+
 def extract_json_object(text: str) -> dict[str, Any]:
     stripped = text.strip()
+    if stripped and not stripped.startswith("{") and "{" not in stripped:
+        stripped = "{" + stripped
     if stripped.startswith("```"):
         stripped = stripped.strip("`")
         if "\n" in stripped:
