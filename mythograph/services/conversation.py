@@ -512,8 +512,8 @@ def _sanitize_options(options: list[str], blocked_options: list[str], profile: I
 
 def _companion_options(profile: InterviewProfile, existing: list[str]) -> list[str]:
     idea = _normalize_text(_first_nonempty(profile.ideas + profile.free_notes))
-    if "rain" in idea:
-        return ["a silver laugh", "wet pavement light", "after-storm yellow", "small ripples"]
+    if any(word in idea for word in ["weather", "light", "bright", "joy", "relief", "fresh", "clean"]):
+        return ["a silver lift", "clean light", "small bright ripples", "a soft opening"]
     if "lonely" in idea or "loneliness" in idea or "silence" in idea:
         return ["a private echo", "a held breath", "a small warm distance", "an open room"]
     if "positive" in idea or "hope" in idea:

@@ -310,11 +310,11 @@ def _uses_stock_symbol_set(recipe: ArtRecipe) -> bool:
 def _symbols_from_profile(profile: InterviewProfile) -> list[Symbol]:
     idea_text = " ".join(profile.ideas + profile.free_notes).lower()
     palette = str(profile.visual_preferences.get("palette_mood", "")).strip()
-    if "rain" in idea_text:
+    if any(word in idea_text for word in ["weather", "light", "bright", "joy", "relief", "fresh", "clean"]):
         return [
-            Symbol(visual="wet pavement light", meaning="joy arriving after the sky opens"),
+            Symbol(visual="clean reflected light", meaning="joy arriving as a change in atmosphere"),
             Symbol(visual="small bright ripples", meaning="happiness spreading without needing to shout"),
-            Symbol(visual=f"{palette or 'hushed'} color rain", meaning="the private weather of relief"),
+            Symbol(visual=f"{palette or 'hushed'} color weather", meaning="the private climate of relief"),
         ]
     if "lonely" in idea_text or "loneliness" in idea_text or "silence" in idea_text:
         return [
@@ -341,12 +341,12 @@ def _personal_connection_explanation(profile: InterviewProfile, recipe: ArtRecip
     chosen = ", ".join(chosen_items)
     palette = str(profile.visual_preferences.get("palette_mood", "")).strip()
     idea_text = idea.lower()
-    if "rain" in idea_text:
+    if any(word in idea_text for word in ["weather", "light", "bright", "joy", "relief", "fresh", "clean"]):
         detail = chosen or palette or "the softened rhythm"
         return (
-            f"The rain here feels less like weather and more like permission to brighten. "
+            f"The atmosphere here feels like permission to brighten. "
             f"{detail.capitalize()} becomes the point where the painting meets the viewer: a quiet joy that spreads outward, "
-            f"as if the day has just been washed clean."
+            f"as if the feeling has found cleaner air."
         )
     if "lonely" in idea_text or "loneliness" in idea_text:
         detail = chosen or palette or "the open space"

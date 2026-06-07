@@ -69,7 +69,7 @@ class RepairClient:
                             "kind": "swatch_picker",
                             "label": "Quiet weather",
                             "prompt": "Pick one atmosphere.",
-                            "options": ["rain glass, graphite, low amber", "chalk, moss, soft black"],
+                            "options": ["mist glass, graphite, low amber", "chalk, moss, soft black"],
                             "sliders": [],
                         }
                     ],
@@ -146,7 +146,7 @@ def main() -> None:
 
         repaired = conversation.choose_conversation_turn_with_model(profile, fallback, RepairClient())
         assert repaired.controls[0].kind == ControlKind.SWATCH_PICKER
-        assert repaired.controls[0].options[0] == "rain glass, graphite, low amber"
+        assert repaired.controls[0].options[0] == "mist glass, graphite, low amber"
 
         wrong_stage = conversation.choose_conversation_turn_with_model(profile, fallback, WrongStageClient())
         assert wrong_stage.controls[0].kind == ControlKind.TEXT_REFINEMENT
