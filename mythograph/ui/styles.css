@@ -258,10 +258,9 @@ button.ma-ghost {
 }
 
 #ma-gallery img {
-  border: 12px solid #e5d6bd !important;
   box-shadow: 0 24px 60px rgba(35, 28, 18, 0.22);
   object-fit: contain !important;
-  background: #f7f1e6 !important;
+  background: transparent !important;
 }
 
 .ma-result-copy {
