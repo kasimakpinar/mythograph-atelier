@@ -21,6 +21,9 @@ class GoodClient:
         assert "available_option_sets" not in user_payload
         assert "next_need" in user_payload
         assert "can_generate" in user_payload
+        assert "preferred_control_kind" in user_payload["next_need"]
+        assert "suggested_component" not in user_payload["next_need"]
+        assert user_payload["allowed_control_kinds"] == ["swatch_picker"]
         assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
         return LLMResponse(
             content=json.dumps(

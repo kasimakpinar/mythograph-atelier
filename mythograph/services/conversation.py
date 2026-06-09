@@ -100,7 +100,7 @@ def choose_conversation_turn_with_model(
         "atelier_state": build_atelier_state(profile),
         "next_need": _next_need_from_turn(fallback_turn),
         "can_generate": fallback_turn.is_ready,
-        "allowed_control_kinds": [kind.value for kind in ControlKind],
+        "allowed_control_kinds": _allowed_control_kinds(fallback_turn),
         "control_guidance": {
             "choice_cards": "3-5 fresh, specific options for one choice.",
             "multi_choice_cards": "3-5 fresh, specific options; user may pick two.",
@@ -157,6 +157,7 @@ def choose_conversation_turn_with_model(
                 "required_shape": "ConversationTurn JSON with assistant_message, progress_label, reason, is_ready, controls.",
                 "next_need": _next_need_from_turn(fallback_turn),
                 "can_generate": fallback_turn.is_ready,
+                "allowed_control_kinds": _allowed_control_kinds(fallback_turn),
             },
             max_tokens=LLM_CHAT_MAX_TOKENS,
             response_format={"type": "json_object"},
@@ -259,8 +260,9 @@ def _repair_system_prompt() -> str:
     return (
         "Return only valid JSON for Mythograph Atelier. No markdown. "
         "Keep one control only. Use allowed kind names exactly. "
-        "Use the suggested_component from next_need unless can_generate is true. "
+        "Use next_need.preferred_control_kind unless can_generate is true. "
         "Do not repeat previous user answers as options. "
+        "Do not output styling, layout, CSS, HTML, Gradio code, or frontend instructions. "
         "If unsure, use text_refinement with empty options and sliders."
     )
 
@@ -382,10 +384,38 @@ def _slider_key(value: str) -> str:
 def _next_need_from_turn(turn: ConversationTurn) -> dict:
     control = turn.controls[0] if turn.controls else None
     return {
-        "goal": turn.reason,
-        "suggested_component": control.kind.value if control else ControlKind.TEXT_REFINEMENT.value,
-        "profile_ready": turn.is_ready,
+        "target": _target_from_turn(turn),
+        "reason": turn.reason,
+        "preferred_control_kind": control.kind.value if control else ControlKind.TEXT_REFINEMENT.value,
     }
+
+
+def _target_from_turn(turn: ConversationTurn) -> str:
+    if turn.is_ready:
+        return "readiness"
+    label = f"{turn.progress_label} {turn.reason}".lower()
+    if "palette" in label or "color" in label:
+        return "palette_mood"
+    if "symbol" in label or "anchor" in label:
+        return "main_symbol"
+    if "style" in label or "presence" in label:
+        return "visual_style"
+    if "taste" in label or "visual" in label:
+        return "visual_preferences"
+    if "mood" in label:
+        return "mood"
+    return "main_idea"
+
+
+def _allowed_control_kinds(fallback_turn: ConversationTurn) -> list[str]:
+    if fallback_turn.is_ready:
+        return [ControlKind.READY_BUTTON.value]
+    if not fallback_turn.controls:
+        return [ControlKind.TEXT_REFINEMENT.value]
+    expected = fallback_turn.controls[0].kind
+    if expected in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS}:
+        return [ControlKind.CHOICE_CARDS.value, ControlKind.MULTI_CHOICE_CARDS.value]
+    return [expected.value]
 
 
 def _recent_choices(profile: InterviewProfile) -> list[str]:
