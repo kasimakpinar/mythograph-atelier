@@ -104,11 +104,10 @@ def choose_conversation_turn_with_model(
         "conversation_budget": "Aim for a useful artwork brief in 4-8 total user interactions. Continue only when the next answer will materially improve the painting.",
         "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
         "control_guidance": {
-            "choice_cards": "3-5 fresh, specific options for one choice.",
-            "multi_choice_cards": "3-5 fresh, specific options; user may pick two.",
-            "swatch_picker": "3-5 short palette moods, not repeated from previous turns.",
-            "slider_group": "2-3 visual dials with expressive labels.",
-            "text_refinement": "one short free-text prompt when user intent is vague.",
+            "choice_cards": "3-5 fresh interpretations, emotional angles, stances, or meanings.",
+            "multi_choice_cards": "3-5 compatible tensions, values, memories, or readings; user may pick two.",
+            "slider_group": "2-3 conceptual dials, never visual dials.",
+            "text_refinement": "one free-text prompt when the topic needs the user's own words.",
             "ready_button": "only when can_generate is true.",
         },
     }
@@ -316,7 +315,6 @@ def _normalize_turn_payload(payload: dict, fallback_turn: ConversationTurn) -> d
     elif kind in {
         ControlKind.CHOICE_CARDS.value,
         ControlKind.MULTI_CHOICE_CARDS.value,
-        ControlKind.SWATCH_PICKER.value,
         ControlKind.READY_BUTTON.value,
     }:
         control["sliders"] = []
@@ -339,8 +337,8 @@ def _label_from_kind(kind: object) -> str:
     labels = {
         ControlKind.CHOICE_CARDS.value: "Choose one",
         ControlKind.MULTI_CHOICE_CARDS.value: "Choose what fits",
-        ControlKind.SLIDER_GROUP.value: "Tune the image",
-        ControlKind.SWATCH_PICKER.value: "Choose color",
+        ControlKind.SLIDER_GROUP.value: "Tune the meaning",
+        ControlKind.SWATCH_PICKER.value: "Choose atmosphere",
         ControlKind.TEXT_REFINEMENT.value: "Your words",
         ControlKind.READY_BUTTON.value: "Create artwork",
     }
@@ -432,9 +430,9 @@ def _next_need_for_model(profile: InterviewProfile, turn: ConversationTurn) -> d
 
 def _model_can_generate(profile: InterviewProfile) -> bool:
     has_personal_meaning = profile.scores.idea_anchor >= 0.55
-    has_visual_signal = profile.scores.visual_taste >= 0.18 or bool(profile.styles) or bool(profile.visual_preferences)
-    has_image_anchor = bool(profile.symbols) or len(profile.ideas + profile.free_notes) >= 3
-    return profile.turn_count >= 3 and has_personal_meaning and has_visual_signal and has_image_anchor
+    has_interpretive_signal = bool(profile.contrasts) or bool(profile.styles) or bool(profile.visual_preferences)
+    has_personal_detail = bool(profile.symbols) or len(profile.ideas + profile.free_notes) >= 3
+    return profile.turn_count >= 3 and has_personal_meaning and has_interpretive_signal and has_personal_detail
 
 
 def _missing_signals(profile: InterviewProfile) -> list[str]:
@@ -442,9 +440,9 @@ def _missing_signals(profile: InterviewProfile) -> list[str]:
     if profile.scores.idea_anchor < 0.55:
         missing.append("personal meaning in the user's own words")
     if not profile.symbols and len(profile.ideas + profile.free_notes) < 3:
-        missing.append("one concrete image, memory, object, gesture, or metaphor")
+        missing.append("one personal memory, example, quote interpretation, contradiction, or metaphor")
     if profile.scores.visual_taste < 0.18 and not profile.styles and not profile.visual_preferences:
-        missing.append("visual direction such as atmosphere, composition, palette, texture, or energy")
+        missing.append("one interpretive stance such as acceptance, resistance, tenderness, courage, grief, control, or release")
     if profile.turn_count < 3:
         missing.append("one more exchange before generation")
     return missing
@@ -487,7 +485,6 @@ def _allowed_control_kinds(fallback_turn: ConversationTurn, can_generate: bool =
         ControlKind.CHOICE_CARDS.value,
         ControlKind.MULTI_CHOICE_CARDS.value,
         ControlKind.SLIDER_GROUP.value,
-        ControlKind.SWATCH_PICKER.value,
     ]
     if can_generate:
         kinds.append(ControlKind.READY_BUTTON.value)
@@ -729,8 +726,8 @@ def apply_control_response(profile: InterviewProfile, response: ControlResponse)
         _apply_choice(profile, values[0] if values else "", response)
     elif response.kind == ControlKind.SLIDER_GROUP:
         profile.visual_preferences.update(response.sliders)
-        if "visual preferences" not in profile.free_notes:
-            profile.free_notes.append("visual preferences")
+        if "meaning dials" not in profile.free_notes:
+            profile.free_notes.append("meaning dials")
     elif response.kind == ControlKind.SWATCH_PICKER:
         if values:
             profile.visual_preferences["palette_mood"] = values[0]

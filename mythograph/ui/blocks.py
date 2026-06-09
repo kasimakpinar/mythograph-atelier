@@ -117,7 +117,7 @@ def build_demo() -> gr.Blocks:
             with gr.Row(elem_id="ma-input-dock"):
                 chat_text = gr.Textbox(
                     label="",
-                    placeholder="Add a thought, correction, symbol, or mood...",
+                    placeholder="Answer in your own words, or add a thought, correction, quote, or memory...",
                     lines=1,
                     max_lines=1,
                     show_label=False,
@@ -508,6 +508,9 @@ def _render(
     regen_button = gr.update(visible=False)
     trace_button = gr.update(visible=bool(history) or bool(activity))
     model_activity = gr.update(value=activity, visible=bool(activity))
+    chat_placeholder = "Answer in your own words, or add a thought, correction, quote, or memory..."
+    if kind == ControlKind.TEXT_REFINEMENT and control and control.prompt:
+        chat_placeholder = control.prompt
     if recipe:
         label = f"## {recipe.title}\n\n{recipe.friend_explanation}"
         symbol_rows = "\n".join(f"| {symbol.visual} | {symbol.meaning} |" for symbol in recipe.symbols)
@@ -524,7 +527,7 @@ def _render(
         gr.update(visible=False),
         gr.update(visible=True),
         history,
-        gr.update(value=""),
+        gr.update(value="", placeholder=chat_placeholder),
         f"**{turn.progress_label}**",
         gr.update(visible=kind == ControlKind.CHOICE_CARDS),
         gr.update(choices=options, value=None),
@@ -536,7 +539,7 @@ def _render(
         gr.update(value=_slider_value_at(turn, 2, 45), label=_slider_label_at(turn, 2, "geometric to organic")),
         gr.update(visible=kind == ControlKind.SWATCH_PICKER),
         gr.update(choices=options, value=None),
-        gr.update(visible=kind == ControlKind.TEXT_REFINEMENT),
+        gr.update(visible=False),
         gr.update(value=""),
         gr.update(visible=turn.is_ready),
         gr.update(visible=show_gallery),

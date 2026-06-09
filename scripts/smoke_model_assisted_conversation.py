@@ -23,23 +23,24 @@ class GoodClient:
         assert "can_generate" in user_payload
         assert "preferred_control_kind" in user_payload["next_need"]
         assert "suggested_component" not in user_payload["next_need"]
-        assert "swatch_picker" in user_payload["allowed_control_kinds"]
+        assert "choice_cards" in user_payload["allowed_control_kinds"]
         assert "text_refinement" in user_payload["allowed_control_kinds"]
+        assert "swatch_picker" not in user_payload["allowed_control_kinds"]
         assert "ready_button" not in user_payload["allowed_control_kinds"]
         assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
         return LLMResponse(
             content=json.dumps(
                 {
-                    "assistant_message": "Choose the visual weather for this private myth.",
-                    "progress_label": "Taste: model-authored color weather",
-                    "reason": "fake hosted model proposed a palette control",
+                    "assistant_message": "Patience can mean endurance, trust, or refusing to be hurried. Which reading feels closest?",
+                    "progress_label": "Meaning: interpretation",
+                    "reason": "fake model proposed a meaning control",
                     "is_ready": False,
                     "controls": [
                         {
-                            "kind": "swatch_picker",
-                            "label": "Color weather",
-                            "prompt": "Pick the atmosphere.",
-                            "options": ["ash, gold, pale blue", "ink, clay, bone"],
+                            "kind": "choice_cards",
+                            "label": "Interpretation",
+                            "prompt": "Pick the closest reading.",
+                            "options": ["quiet endurance", "trusting the slow path", "refusing to be hurried"],
                             "sliders": [],
                         }
                     ],
@@ -65,16 +66,16 @@ class RepairClient:
         return LLMResponse(
             content=json.dumps(
                 {
-                    "assistant_message": "Choose the symbol that keeps returning.",
-                    "progress_label": "Symbol: repaired",
+                    "assistant_message": "Let us make the meaning less decorative. Which inner stance should patience carry here?",
+                    "progress_label": "Meaning: repaired",
                     "reason": "repair produced valid UI JSON",
                     "is_ready": False,
                     "controls": [
                         {
-                            "kind": "swatch_picker",
-                            "label": "Quiet weather",
-                            "prompt": "Pick one atmosphere.",
-                            "options": ["mist glass, graphite, low amber", "chalk, moss, soft black"],
+                            "kind": "choice_cards",
+                            "label": "Inner stance",
+                            "prompt": "Pick one stance.",
+                            "options": ["acceptance without surrender", "strength without noise"],
                             "sliders": [],
                         }
                     ],
@@ -146,12 +147,12 @@ def main() -> None:
         fallback = conversation.choose_conversation_turn(profile)
 
         good = conversation.choose_conversation_turn_with_model(profile, fallback, GoodClient())
-        assert good.controls[0].kind == ControlKind.SWATCH_PICKER
-        assert good.controls[0].options[0] == "ash, gold, pale blue"
+        assert good.controls[0].kind == ControlKind.CHOICE_CARDS
+        assert good.controls[0].options[0] == "quiet endurance"
 
         repaired = conversation.choose_conversation_turn_with_model(profile, fallback, RepairClient())
-        assert repaired.controls[0].kind == ControlKind.SWATCH_PICKER
-        assert repaired.controls[0].options[0] == "mist glass, graphite, low amber"
+        assert repaired.controls[0].kind == ControlKind.CHOICE_CARDS
+        assert repaired.controls[0].options[0] == "acceptance without surrender"
 
         free_control = conversation.choose_conversation_turn_with_model(profile, fallback, FreeControlClient())
         assert free_control.controls[0].kind == ControlKind.TEXT_REFINEMENT

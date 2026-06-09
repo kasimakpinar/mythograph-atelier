@@ -16,15 +16,18 @@ Required JSON fields:
 - friend_explanation: string
 
 Rules:
-- Be concise. Do not write long essays.
-- Make abstract art, not a literal scene.
-- Use shapes, fields, voids, lines, pressure, texture, rhythm, and contrast.
-- Invent a specific spatial strategy for this person: off-center field, diagonal drift, horizon pressure, orbit, cascade, sparse cluster, edge pressure, submerged layer, broken ring, or another clear arrangement.
+- Be concise, but make the friend_explanation understandable.
+- Make non-representational abstract art, not a literal scene.
+- Do not create landscapes, scenery, fields, skies, horizons, rooms, still lifes, portraits, or recognizable objects.
+- Use shapes, color planes, voids, lines, pressure, texture, rhythm, and contrast.
+- Use "color plane" instead of "field" when describing space, because "field" can become a literal landscape.
+- Invent a specific spatial strategy for this person: off-center color plane, diagonal drift, horizontal pressure band, orbit, cascade, sparse cluster, edge pressure, submerged layer, broken ring, or another clear abstract arrangement.
 - Avoid default grid, split-screen, collage, tiled, four-quadrant, and four equal square panel compositions unless the user explicitly asked for them.
 - Do not default to centered blocks, balanced quadrants, or generic geometric panels.
 - Preserve the user's own words and emotional intent in main_idea and friend_explanation, but transform them into concise art language.
 - Treat user-provided ideas, symbols, palette mood, and visual preferences as stronger evidence than fallback defaults.
-- The friend_explanation must be short, memorable, and easy to say to a friend.
+- The friend_explanation must be 2-4 plain sentences that connect the user's meaning to visible abstract choices.
+- The explanation should not be cryptic. Say what the painting is trying to hold emotionally, then why the abstract image fits.
 - The meaning is the connection between a person and an abstract painting.
 - Explain why this specific person might feel connected to this specific abstract image, using at least one concrete choice from the conversation.
 - Do not use stock symbols unless the user chose them.

@@ -68,7 +68,7 @@ def build_art_recipe(profile: InterviewProfile, regeneration_instruction: str | 
     visual_style = _visual_style_sentence(profile, style, regeneration_instruction)
     composition = _composition_sentence(profile, symbol_names)
     image_prompt = (
-        f"Single-canvas abstract contemporary painting, landscape format, {visual_style}, palette {', '.join(palette)}, "
+        f"Single-canvas non-representational abstract contemporary painting, horizontal canvas, {visual_style}, palette {', '.join(palette)}, "
         f"{composition}. Visual symbols: {', '.join(symbol.visual for symbol in symbols)}. "
         f"Main idea: {idea}. Expressive texture, intentional negative space, non-grid spatial tension, "
         f"no text, no letters, no words, no signature, no watermark."
@@ -234,7 +234,8 @@ def _repair_recipe_prompt() -> str:
         "Required keys: title, main_idea, visual_style, palette, symbols, composition, "
         "image_prompt, negative_prompt, friend_explanation. "
         "symbols must be objects with visual and meaning. "
-        "Do not use the phrase 'is not decoration'."
+        "Do not use the phrase 'is not decoration'. "
+        "Make image_prompt non-representational abstract art, not a literal scene."
     )
 
 
@@ -285,7 +286,7 @@ def _image_prompt_from_partial(payload: dict, fallback: ArtRecipe) -> str:
     if not visual_symbols:
         visual_symbols = [symbol.visual for symbol in fallback.symbols[:3]]
     return (
-        f"Single-canvas abstract contemporary painting, landscape format, {style}, {composition}. "
+        f"Single-canvas non-representational abstract contemporary painting, horizontal canvas, {style}, {composition}. "
         f"Visual symbols: {', '.join(visual_symbols)}. Main idea: {idea}. "
         "No grid, no panels, no text, expressive texture, intentional negative space."
     )
@@ -299,7 +300,11 @@ def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: 
     recipe.image_prompt = recipe.image_prompt.strip() or fallback.image_prompt
     recipe.negative_prompt = recipe.negative_prompt.strip() or fallback.negative_prompt
 
-    if _uses_stock_explanation(recipe.friend_explanation) or _sounds_robotic(recipe.friend_explanation):
+    if (
+        _uses_stock_explanation(recipe.friend_explanation)
+        or _sounds_robotic(recipe.friend_explanation)
+        or _explanation_too_thin(recipe.friend_explanation)
+    ):
         recipe.friend_explanation = _personal_connection_explanation(profile, recipe)
 
     chosen_symbol_text = " ".join(profile.symbols).lower()
@@ -308,9 +313,33 @@ def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: 
 
     if "no text" not in recipe.image_prompt.lower():
         recipe.image_prompt = f"{recipe.image_prompt}, no text, no letters, no signature, no watermark"
+    recipe.image_prompt = _avoid_literal_scene_language(recipe.image_prompt)
     recipe.image_prompt = _with_layout_diversity(recipe.image_prompt)
     recipe.negative_prompt = _with_negative_layouts(recipe.negative_prompt)
     return recipe
+
+
+def _avoid_literal_scene_language(prompt: str) -> str:
+    replacements = {
+        "wide open field": "wide open color plane",
+        "open field": "open color plane",
+        "empty field": "empty color plane",
+        "pale field": "pale color plane",
+        "cleared field": "cleared color plane",
+        "landscape format": "horizontal canvas",
+        "horizon": "horizontal pressure band",
+    }
+    cleaned = prompt
+    for old, new in replacements.items():
+        cleaned = cleaned.replace(old, new).replace(old.title(), new)
+    guidance = (
+        "non-representational abstraction, no scenery, no literal landscape, no sky, no ground plane, "
+        "no horizon line, no recognizable objects, no figures"
+    )
+    lowered = cleaned.lower()
+    if "non-representational" in lowered and "no literal landscape" in lowered:
+        return cleaned
+    return f"{cleaned}, {guidance}"
 
 
 def _with_layout_diversity(prompt: str) -> str:
@@ -333,6 +362,16 @@ def _with_negative_layouts(negative_prompt: str) -> str:
         "collage grid",
         "comic panels",
         "centered block grid",
+        "literal landscape",
+        "scenery",
+        "sky",
+        "ground plane",
+        "horizon line",
+        "mountains",
+        "trees",
+        "flowers",
+        "buildings",
+        "recognizable objects",
     ]
     lowered = negative_prompt.lower()
     missing = [item for item in additions if item not in lowered]
@@ -359,6 +398,11 @@ def _sounds_robotic(text: str) -> bool:
     )
 
 
+def _explanation_too_thin(text: str) -> bool:
+    words = (text or "").split()
+    return len(words) < 24
+
+
 def _uses_stock_symbol_set(recipe: ArtRecipe) -> bool:
     visuals = {symbol.visual.lower().strip() for symbol in recipe.symbols[:3]}
     return {"a line", "a door", "a flame"}.issubset(visuals)
@@ -375,7 +419,7 @@ def _symbols_from_profile(profile: InterviewProfile) -> list[Symbol]:
         ]
     if "lonely" in idea_text or "loneliness" in idea_text or "silence" in idea_text:
         return [
-            Symbol(visual="a pale open field", meaning="room around the feeling instead of escape from it"),
+            Symbol(visual="a pale open color plane", meaning="room around the feeling instead of escape from it"),
             Symbol(visual="a small echoing mark", meaning="the self answering back softly"),
             Symbol(visual=f"{palette or 'soft'} color hush", meaning="peace arriving as atmosphere, not explanation"),
         ]
@@ -386,7 +430,7 @@ def _symbols_from_profile(profile: InterviewProfile) -> list[Symbol]:
             Symbol(visual=f"{palette or 'bright'} pulse", meaning="optimism held in color"),
         ]
     return [
-        Symbol(visual="an open field", meaning="the viewer's private room inside the painting"),
+        Symbol(visual="an open color plane", meaning="the viewer's private room inside the painting"),
         Symbol(visual="one recurring mark", meaning="the thought that keeps returning"),
         Symbol(visual=f"{palette or 'chosen'} color pressure", meaning="emotion translated into atmosphere"),
     ]
@@ -478,12 +522,12 @@ def _visual_style_sentence(profile: InterviewProfile, style: str, regeneration_i
 
 def _composition_sentence(profile: InterviewProfile, symbols: list[str]) -> str:
     strategies = [
-        f"an off-center field pulled toward the lower right by {symbols[0]}, with a long quiet margin above it",
+        f"an off-center color plane pulled toward the lower right by {symbols[0]}, with a long quiet margin above it",
         f"a diagonal drift of interrupted marks around {symbols[0]}, leaving one open path through the canvas",
-        f"a low horizon of pressure with {symbols[0]} suspended above it and sparse echoes near the edges",
+        f"a low horizontal pressure band with {symbols[0]} suspended above it and sparse echoes near the edges",
         f"a broken ring of texture orbiting {symbols[0]}, with the center deliberately left unresolved",
-        f"a cascade of thin fields descending from one edge, interrupted by {symbols[0]} before it reaches the center",
-        f"one dense corner pushing against a wide empty field, with {symbols[0]} acting as the hinge",
+        f"a cascade of thin color planes descending from one edge, interrupted by {symbols[0]} before it reaches the center",
+        f"one dense corner pushing against a wide empty color plane, with {symbols[0]} acting as the hinge",
     ]
     signature = "|".join(profile.ideas + profile.symbols + profile.free_notes + [str(profile.visual_preferences)])
     index = sum(ord(char) for char in signature) % len(strategies)
