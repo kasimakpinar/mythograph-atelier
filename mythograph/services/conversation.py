@@ -121,93 +121,78 @@ def choose_conversation_turn_with_model(
     if response.source == "mock":
         return fallback_turn
 
-    if response.error:
-        elapsed_seconds = round(time.perf_counter() - started, 3)
-        error_turn = model_error_turn(
-            "The text model could not answer cleanly. Try one shorter phrase.",
-            response.error,
-        )
-        log_event(
-            "llm_conversation_turn",
-            {
-                "source": response.source,
-                "elapsed_seconds": elapsed_seconds,
-                "error": response.error,
-                "transport_error": response.error,
-                "raw_content": response.content,
-                "raw_preview": _preview(response.content),
-                "used_fallback": False,
-                "retry_count": 0,
-                "chosen_control": error_turn.controls[0].kind if error_turn.controls else None,
-                "atelier_state": build_atelier_state(profile),
-                "turn": error_turn.model_dump(),
-            },
-        )
-        return error_turn
-
-    try:
-        candidate = ConversationTurn.model_validate(
-            _normalize_turn_payload(extract_json_object(response.content), fallback_turn)
-        )
-        candidate = sanitize_conversation_turn(candidate, fallback_turn, profile, can_generate)
-    except Exception as exc:
-        repair_response = llm.complete_json(
-            _repair_system_prompt(),
-            {
-                "invalid_json": response.content,
-                "required_shape": "ConversationTurn JSON with assistant_message, progress_label, reason, is_ready, controls.",
-                "next_need": _next_need_for_model(profile, fallback_turn),
-                "can_generate": can_generate,
-                "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
-            },
-            max_tokens=max(LLM_CHAT_MAX_TOKENS, 180),
-            response_format={"type": "json_object"},
-        )
+    last_error = response.error or ""
+    last_content = response.content
+    current_response = response
+    max_attempts = 4
+    for attempt in range(max_attempts):
         try:
+            if current_response.error:
+                raise ValueError(current_response.error)
             candidate = ConversationTurn.model_validate(
-                _normalize_turn_payload(extract_json_object(repair_response.content), fallback_turn)
+                _normalize_turn_payload(extract_json_object(current_response.content), fallback_turn)
             )
             candidate = sanitize_conversation_turn(candidate, fallback_turn, profile, can_generate)
-        except Exception as repair_exc:
-            elapsed_seconds = round(time.perf_counter() - started, 3)
-            raw_content = repair_response.content or response.content
-            error_text = f"{exc}; repair failed: {repair_exc}"
-            if repair_response.error:
-                error_text += f"; repair transport: {repair_response.error}"
-            error_turn = model_error_turn(
-                "The text model drifted outside the UI schema. Try one sharper sentence.",
-                error_text,
-            )
-            log_event(
-                "llm_conversation_turn",
+            quality_issue = _turn_quality_issue(candidate, profile)
+            if quality_issue:
+                raise ValueError(quality_issue)
+        except Exception as exc:
+            last_error = str(exc)
+            last_content = current_response.content or last_content
+            if attempt >= max_attempts - 1:
+                elapsed_seconds = round(time.perf_counter() - started, 3)
+                error_turn = model_error_turn(
+                    "The text model drifted outside the UI schema. Try one sharper sentence.",
+                    last_error,
+                )
+                log_event(
+                    "llm_conversation_turn",
+                    {
+                        "source": current_response.source or response.source,
+                        "elapsed_seconds": elapsed_seconds,
+                        "error": last_error,
+                        "transport_error": current_response.error,
+                        "raw_content": last_content,
+                        "raw_preview": _preview(last_content),
+                        "used_fallback": False,
+                        "retry_count": attempt,
+                        "chosen_control": error_turn.controls[0].kind if error_turn.controls else None,
+                        "atelier_state": build_atelier_state(profile),
+                        "turn": error_turn.model_dump(),
+                    },
+                )
+                return error_turn
+
+            current_response = llm.complete_json(
+                _repair_system_prompt(),
                 {
-                    "source": repair_response.source or response.source,
-                    "elapsed_seconds": elapsed_seconds,
-                    "error": error_text,
-                    "transport_error": repair_response.error,
-                    "raw_content": raw_content,
-                    "raw_preview": _preview(raw_content),
-                    "used_fallback": False,
-                    "retry_count": 1,
-                    "chosen_control": error_turn.controls[0].kind if error_turn.controls else None,
+                    "invalid_json": current_response.content,
+                    "previous_error": last_error,
+                    "attempt": attempt + 1,
+                    "required_shape": "ConversationTurn JSON with assistant_message, progress_label, reason, is_ready, controls.",
+                    "next_need": _next_need_for_model(profile, fallback_turn),
+                    "can_generate": can_generate,
+                    "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
                     "atelier_state": build_atelier_state(profile),
-                    "turn": error_turn.model_dump(),
+                    "quality_rules": _quality_rules_for_retry(profile),
                 },
+                max_tokens=max(LLM_CHAT_MAX_TOKENS, 180),
+                response_format={"type": "json_object"},
             )
-            return error_turn
+            continue
 
         elapsed_seconds = round(time.perf_counter() - started, 3)
         log_event(
             "llm_conversation_turn",
             {
-                "source": repair_response.source,
+                "source": current_response.source,
                 "elapsed_seconds": elapsed_seconds,
-                "error": str(exc),
-                "transport_error": repair_response.error,
-                "raw_content": repair_response.content,
-                "raw_preview": _preview(repair_response.content),
+                "error": last_error if attempt else None,
+                "transport_error": current_response.error,
+                "raw_content": current_response.content,
+                "raw_preview": _preview(current_response.content),
                 "used_fallback": False,
-                "retry_count": 1,
+                "retry_count": attempt,
                 "chosen_control": candidate.controls[0].kind if candidate.controls else None,
                 "atelier_state": build_atelier_state(profile),
                 "turn": candidate.model_dump(),
@@ -215,23 +200,7 @@ def choose_conversation_turn_with_model(
         )
         return candidate
 
-    elapsed_seconds = round(time.perf_counter() - started, 3)
-    log_event(
-        "llm_conversation_turn",
-        {
-            "source": response.source,
-            "elapsed_seconds": elapsed_seconds,
-            "transport_error": response.error,
-            "raw_content": response.content,
-            "raw_preview": _preview(response.content),
-            "used_fallback": False,
-            "retry_count": 0,
-            "chosen_control": candidate.controls[0].kind if candidate.controls else None,
-            "atelier_state": build_atelier_state(profile),
-            "turn": candidate.model_dump(),
-        },
-    )
-    return candidate
+    return model_error_turn("The text model drifted outside the UI schema. Try one sharper sentence.", last_error)
 
 
 def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
@@ -262,10 +231,107 @@ def _repair_system_prompt() -> str:
         "Return only valid JSON for Mythograph Atelier. No markdown. "
         "Keep one control only. Use allowed kind names exactly. "
         "Choose a useful semantic control from allowed_control_kinds. "
-        "Do not repeat previous user answers as options. "
+        "Do not repeat previous questions or previous user answers as options. "
+        "Do not say 'one more ingredient', 'strong image', 'anchor the painting', or 'which detail makes this feeling yours'. "
+        "Ask a clear meaning-first question about the user's topic, memory, quote, value, contradiction, or belief. "
         "Do not output styling, layout, CSS, HTML, Gradio code, or frontend instructions. "
-        "If unsure, use text_refinement with empty options and sliders."
+        "If unsure, use text_refinement with empty options and sliders, and make assistant_message end with a clear question."
     )
+
+
+def _quality_rules_for_retry(profile: InterviewProfile) -> dict:
+    return {
+        "avoid_phrases": _banned_turn_phrases(),
+        "avoid_questions": profile.asked_questions[-8:],
+        "avoid_options": profile.offered_options[-24:],
+        "minimum_options_for_card_controls": 3,
+        "text_refinement_must_end_with_clear_question": True,
+        "prefer_different_control_kind_than_recent": profile.control_history[-3:],
+    }
+
+
+def _turn_quality_issue(candidate: ConversationTurn, profile: InterviewProfile) -> str:
+    control = candidate.controls[0] if candidate.controls else None
+    if not control or candidate.is_ready:
+        return ""
+
+    message = _normalize_text(candidate.assistant_message)
+    prompt = _normalize_text(control.prompt)
+    combined = f"{message} {prompt}"
+    for phrase in _banned_turn_phrases():
+        if phrase in combined:
+            return f"repeated or robotic phrase: {phrase}"
+
+    if any(_texts_too_similar(message, _normalize_text(question)) for question in profile.asked_questions[-6:]):
+        return "assistant_message repeats a previous question"
+    if any(_texts_too_similar(prompt, _normalize_text(question)) for question in profile.asked_questions[-6:]):
+        return "control prompt repeats a previous question"
+
+    if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS}:
+        if len(control.options) < 3:
+            return f"{control.kind.value} needs at least three useful options"
+        if _options_too_similar(control.options, profile.offered_options[-24:]):
+            return "options are too similar to previous options"
+
+    if control.kind == ControlKind.TEXT_REFINEMENT and not _looks_like_question(candidate.assistant_message, control.prompt):
+        return "text_refinement must ask a clear question"
+
+    recent_kinds = profile.control_history[-3:]
+    if len(recent_kinds) >= 2 and all(kind == control.kind.value for kind in recent_kinds[-2:]):
+        return f"control kind {control.kind.value} has repeated too often"
+
+    return ""
+
+
+def _banned_turn_phrases() -> list[str]:
+    return [
+        "one more ingredient",
+        "personal ingredient",
+        "strong image",
+        "anchor the painting",
+        "anchor the calmness",
+        "anchor it",
+        "image can settle",
+        "before the image can settle",
+        "painting's skin",
+        "visual pressure",
+        "visual direction",
+        "which detail makes this feeling yours",
+        "what should anchor",
+        "what should it carry",
+    ]
+
+
+def _looks_like_question(message: str, prompt: str) -> bool:
+    text = f"{message} {prompt}".strip()
+    if "?" in text:
+        return True
+    lowered = _normalize_text(text)
+    starts = ("what ", "which ", "when ", "where ", "who ", "whose ", "how ", "why ", "tell me ", "describe ")
+    return lowered.startswith(starts) or any(f" {start}" in lowered for start in starts)
+
+
+def _texts_too_similar(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    left_words = {word for word in left.split() if len(word) > 3}
+    right_words = {word for word in right.split() if len(word) > 3}
+    if len(left_words) < 4 or len(right_words) < 4:
+        return False
+    overlap = len(left_words & right_words) / max(1, min(len(left_words), len(right_words)))
+    return overlap >= 0.72
+
+
+def _options_too_similar(options: list[str], previous_options: list[str]) -> bool:
+    previous = [_normalize_text(option) for option in previous_options]
+    repeated = 0
+    for option in options:
+        normalized = _normalize_text(option)
+        if normalized in previous or any(_texts_too_similar(normalized, item) for item in previous):
+            repeated += 1
+    return repeated >= max(2, len(options) // 2 + 1)
 
 
 def build_atelier_state(profile: InterviewProfile) -> dict:
@@ -284,7 +350,12 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
         "already_chosen": _recent_choices(profile),
         "avoid_questions": profile.asked_questions[-5:],
         "avoid_options": profile.offered_options[-16:],
+        "recent_control_kinds": _recent_control_kinds(profile),
     }
+
+
+def _recent_control_kinds(profile: InterviewProfile) -> list[str]:
+    return profile.control_history[-4:]
 
 
 def _normalize_turn_payload(payload: dict, fallback_turn: ConversationTurn) -> dict:
@@ -444,7 +515,7 @@ def _missing_signals(profile: InterviewProfile) -> list[str]:
     if profile.scores.visual_taste < 0.18 and not profile.styles and not profile.visual_preferences:
         missing.append("one interpretive stance such as acceptance, resistance, tenderness, courage, grief, control, or release")
     if profile.turn_count < 3:
-        missing.append("one more exchange before generation")
+        missing.append("another exchange before generation")
     return missing
 
 
@@ -538,8 +609,12 @@ def sanitize_conversation_turn(
 
     if control.kind == ControlKind.READY_BUTTON and not can_generate:
         raise ValueError("model requested ready_button before profile was ready")
+    if control.kind == ControlKind.SWATCH_PICKER:
+        raise ValueError("swatch_picker is not allowed during the meaning-first interview")
 
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
+        if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS} and len(control.options) < 3:
+            raise ValueError(f"{control.kind.value} must provide at least three options before sanitization")
         control.options = _sanitize_options(control.options, _recent_choices(profile), profile)
     elif control.kind == ControlKind.SLIDER_GROUP:
         control.sliders = _sanitize_sliders(control.sliders)
@@ -547,8 +622,8 @@ def sanitize_conversation_turn(
         control.options = []
         control.sliders = []
 
-    if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER} and not control.options:
-        raise ValueError(f"{control.kind.value} needs at least one option")
+    if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER} and len(control.options) < 3:
+        raise ValueError(f"{control.kind.value} needs at least three options")
     if control.kind == ControlKind.SLIDER_GROUP and not control.sliders:
         raise ValueError("slider_group needs at least one slider")
     candidate.assistant_message = _polish_assistant_message(candidate, profile)
@@ -588,14 +663,12 @@ def _polish_assistant_message(candidate: ConversationTurn, profile: InterviewPro
     if not control or (not too_thin and not repeated):
         return message
     if control.kind == ControlKind.SLIDER_GROUP:
-        return "How should that feeling move across the canvas?"
+        return "Which inner tension should lead this meaning?"
     if control.kind == ControlKind.SWATCH_PICKER:
-        return "What color weather should carry this feeling?"
+        return "Which atmosphere should carry this meaning?"
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS}:
-        if profile.visual_preferences.get("palette_mood"):
-            return "What should remain in the room after the first glance?"
-        return "Which detail makes this feeling yours?"
-    return message or "What should the painting understand next?"
+        return "Which interpretation feels closest to what you mean?"
+    return message or "What should the atelier understand next?"
 
 
 def _expected_control_kind(fallback_turn: ConversationTurn) -> ControlKind | None:
@@ -620,7 +693,7 @@ def _sanitize_options(options: list[str], blocked_options: list[str], profile: I
             cleaned.append(value)
         if len(cleaned) >= 5:
             break
-    if len(cleaned) < 2:
+    if len(cleaned) < 3:
         for option in _companion_options(profile, cleaned):
             normalized = _normalize_text(option)
             if normalized not in blocked_options and option not in cleaned:
@@ -633,18 +706,18 @@ def _sanitize_options(options: list[str], blocked_options: list[str], profile: I
 def _companion_options(profile: InterviewProfile, existing: list[str]) -> list[str]:
     idea = _normalize_text(_first_nonempty(profile.ideas + profile.free_notes))
     if any(word in idea for word in ["weather", "light", "bright", "joy", "relief", "fresh", "clean"]):
-        return ["a silver lift", "clean light", "small bright ripples", "a soft opening"]
+        return ["relief after heaviness", "permission to begin again", "joy that feels almost private", "a bright feeling with a quiet cost"]
     if "lonely" in idea or "loneliness" in idea or "silence" in idea:
-        return ["a private echo", "a held breath", "a small warm distance", "an open room"]
+        return ["peace inside solitude", "wanting distance without disappearing", "being alone but still answered", "softness without rescue"]
     if "positive" in idea or "hope" in idea:
-        return ["a small glow", "a rising edge", "a clear morning mark", "a brave softness"]
+        return ["hope without certainty", "choosing the next step anyway", "quiet optimism", "strength that stays gentle"]
     if "chaos" in idea:
-        return ["a quiet center", "a broken rhythm", "a path through noise", "a bright interruption"]
+        return ["calm as resistance", "control without stiffness", "not running from noise", "a private center under pressure"]
     return [
         *(existing or []),
-        "a hidden second voice",
-        "a quiet counterweight",
-        "something unnamed",
+        "acceptance without surrender",
+        "a feeling that has not found words yet",
+        "tenderness under pressure",
     ]
 
 
@@ -653,12 +726,16 @@ def _remember_model_turn(profile: InterviewProfile, turn: ConversationTurn) -> N
     if question and question not in profile.asked_questions:
         profile.asked_questions.append(question)
     if turn.controls:
+        kind = turn.controls[0].kind.value
+        if kind not in {ControlKind.READY_BUTTON.value, ControlKind.TEXT_REFINEMENT.value}:
+            profile.control_history.append(kind)
         for option in turn.controls[0].options:
             clean = option.strip()
             if clean and clean not in profile.offered_options:
                 profile.offered_options.append(clean)
     profile.asked_questions = profile.asked_questions[-8:]
     profile.offered_options = profile.offered_options[-24:]
+    profile.control_history = profile.control_history[-8:]
 
 
 def _clean_option_text(value: str) -> str:

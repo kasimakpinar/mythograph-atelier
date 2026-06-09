@@ -18,5 +18,6 @@ class InterviewProfile(BaseModel):
     free_notes: list[str] = Field(default_factory=list)
     asked_questions: list[str] = Field(default_factory=list)
     offered_options: list[str] = Field(default_factory=list)
+    control_history: list[str] = Field(default_factory=list)
     turn_count: int = 0
     scores: ObjectiveScores = Field(default_factory=ObjectiveScores)

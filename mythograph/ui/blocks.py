@@ -1,7 +1,7 @@
 import gradio as gr
 import spaces
 
-from mythograph.config import APP_TITLE, ROOT_DIR
+from mythograph.config import APP_TITLE, IMAGE_HEIGHT, IMAGE_WIDTH, ROOT_DIR
 from mythograph.models.image_client import ImageClient
 from mythograph.models.llm_client import LlamaCppClient, preload_llamacpp_if_configured, runtime_status
 from mythograph.schemas.profile import InterviewProfile
@@ -139,7 +139,12 @@ def build_demo() -> gr.Blocks:
             with gr.Group(visible=False, elem_id="ma-gallery") as gallery_group:
                 with gr.Row(elem_classes=["ma-gallery-grid"]):
                     with gr.Column(scale=5):
-                        image_output = gr.Image(label="", type="filepath", height=620, show_label=False)
+                        image_output = gr.Image(
+                            label="",
+                            type="filepath",
+                            height=_gallery_image_height(),
+                            show_label=False,
+                        )
                     with gr.Column(scale=4, elem_classes=["ma-result-copy"]):
                         gallery_label = gr.Markdown("")
                         symbol_map = gr.Markdown("", elem_classes=["ma-symbol-table"])
@@ -290,6 +295,12 @@ def _format_runtime_status() -> str:
     else:
         model = "deterministic fallback"
     return f"Runtime: `{mode}` | Text model: `{model}`"
+
+
+def _gallery_image_height() -> int:
+    if IMAGE_WIDTH <= 0 or IMAGE_HEIGHT <= 0:
+        return 620
+    return max(360, min(760, int(620 * (IMAGE_HEIGHT / IMAGE_WIDTH))))
 
 
 def _profile(data: dict) -> InterviewProfile:

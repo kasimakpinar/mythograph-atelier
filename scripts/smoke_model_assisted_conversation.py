@@ -75,7 +75,7 @@ class RepairClient:
                             "kind": "choice_cards",
                             "label": "Inner stance",
                             "prompt": "Pick one stance.",
-                            "options": ["acceptance without surrender", "strength without noise"],
+                            "options": ["acceptance without surrender", "strength without noise", "patience as chosen restraint"],
                             "sliders": [],
                         }
                     ],
@@ -134,6 +134,55 @@ class LooseSliderClient:
         )
 
 
+class RepetitiveThenGoodClient:
+    def __init__(self):
+        self.calls = 0
+
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(
+                content=json.dumps(
+                    {
+                        "assistant_message": "Which detail makes this feeling yours?",
+                        "progress_label": "Looping",
+                        "reason": "repeats a robotic question",
+                        "is_ready": False,
+                        "controls": [
+                            {
+                                "kind": "choice_cards",
+                                "label": "Detail",
+                                "prompt": "Which detail makes this feeling yours?",
+                                "options": ["yours"],
+                                "sliders": [],
+                            }
+                        ],
+                    }
+                ),
+                source="llamacpp",
+            )
+        return LLMResponse(
+            content=json.dumps(
+                {
+                    "assistant_message": "Patience can be passive, but it can also be a decision not to let urgency own you. Which version should this piece understand?",
+                    "progress_label": "Meaning: fresh retry",
+                    "reason": "retry moved to a clearer meaning question",
+                    "is_ready": False,
+                    "controls": [
+                        {
+                            "kind": "choice_cards",
+                            "label": "Meaning",
+                            "prompt": "Pick the closest version.",
+                            "options": ["quiet refusal", "trust in slow change", "discipline without hardness"],
+                            "sliders": [],
+                        }
+                    ],
+                }
+            ),
+            source="llamacpp",
+        )
+
+
 def main() -> None:
     original_mode = conversation.CONVERSATION_MODE
     conversation.CONVERSATION_MODE = "model_assisted"
@@ -167,6 +216,12 @@ def main() -> None:
         assert loose_slider.controls[0].kind == ControlKind.SLIDER_GROUP
         assert loose_slider.controls[0].prompt == "pulse"
         assert loose_slider.controls[0].sliders[0].key == "density"
+
+        repetitive_client = RepetitiveThenGoodClient()
+        fresh = conversation.choose_conversation_turn_with_model(profile, fallback, repetitive_client)
+        assert repetitive_client.calls == 2
+        assert fresh.controls[0].kind == ControlKind.CHOICE_CARDS
+        assert fresh.controls[0].options[0] == "quiet refusal"
 
         bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
         assert bad.controls[0].kind == ControlKind.TEXT_REFINEMENT

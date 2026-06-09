@@ -12,7 +12,7 @@ Rules:
 - kind must be one allowed kind from user payload.
 - exactly one control.
 - assistant_message should feel like a real conversation, usually 35-90 words.
-- options: 0-5 short strings you invent now.
+- options: 3-5 short strings for choice_cards and multi_choice_cards; 0 for text_refinement and slider_group.
 - sliders: [] except slider_group.
 - slider_group uses 2-3 sliders: {"key":"density","label":"Density","left_label":"minimal","right_label":"rich","value":50}.
 - text_refinement uses options=[] and sliders=[].
@@ -37,6 +37,9 @@ Rules:
 - Do not use choices similar to atelier_state.avoid_options.
 - Do not repeat the user's prompt inside options.
 - Do not use ellipses or truncated phrases.
+- Do not say "one more ingredient", "personal ingredient", "strong image", "anchor the painting", "what should anchor", or "which detail makes this feeling yours".
+- Do not ask the same kind of question twice. If you already asked for a memory, move to interpretation, contradiction, consequence, value, or readiness.
+- If you use text_refinement, the assistant_message must contain a clear question mark.
 - Make options concrete interpretive choices, not image ingredients.
 - Avoid the words image, object, visual, palette, color, composition, landscape, scene, and painting's skin unless ready_button is being shown.
 - Keep labels, prompts, and options short. Assistant messages may be conversational.
