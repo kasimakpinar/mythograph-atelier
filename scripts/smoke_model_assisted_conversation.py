@@ -23,7 +23,9 @@ class GoodClient:
         assert "can_generate" in user_payload
         assert "preferred_control_kind" in user_payload["next_need"]
         assert "suggested_component" not in user_payload["next_need"]
-        assert user_payload["allowed_control_kinds"] == ["swatch_picker"]
+        assert "swatch_picker" in user_payload["allowed_control_kinds"]
+        assert "text_refinement" in user_payload["allowed_control_kinds"]
+        assert "ready_button" not in user_payload["allowed_control_kinds"]
         assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
         return LLMResponse(
             content=json.dumps(
@@ -82,21 +84,21 @@ class RepairClient:
         )
 
 
-class WrongStageClient:
+class FreeControlClient:
     def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
         return LLMResponse(
             content=json.dumps(
                 {
-                    "assistant_message": "How does patience feel?",
-                    "progress_label": "Looping",
-                    "reason": "wrong component",
+                    "assistant_message": "I want to hear this in your words before I turn it into marks. What does patience protect?",
+                    "progress_label": "Listening: personal meaning",
+                    "reason": "free text can deepen the profile",
                     "is_ready": False,
                     "controls": [
                         {
-                            "kind": "choice_cards",
-                            "label": "Feel",
-                            "prompt": "Choose one.",
-                            "options": ["calm", "sharp"],
+                            "kind": "text_refinement",
+                            "label": "Your words",
+                            "prompt": "Write one small sentence.",
+                            "options": [],
                             "sliders": [],
                         }
                     ],
@@ -151,9 +153,9 @@ def main() -> None:
         assert repaired.controls[0].kind == ControlKind.SWATCH_PICKER
         assert repaired.controls[0].options[0] == "mist glass, graphite, low amber"
 
-        wrong_stage = conversation.choose_conversation_turn_with_model(profile, fallback, WrongStageClient())
-        assert wrong_stage.controls[0].kind == ControlKind.TEXT_REFINEMENT
-        assert wrong_stage.progress_label == "Model: retry needed"
+        free_control = conversation.choose_conversation_turn_with_model(profile, fallback, FreeControlClient())
+        assert free_control.controls[0].kind == ControlKind.TEXT_REFINEMENT
+        assert free_control.progress_label == "Listening: personal meaning"
 
         slider_profile = conversation.new_profile()
         slider_profile.ideas.extend(["I want something about being positive", "sharp"])

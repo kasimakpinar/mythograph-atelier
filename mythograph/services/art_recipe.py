@@ -281,7 +281,37 @@ def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: 
 
     if "no text" not in recipe.image_prompt.lower():
         recipe.image_prompt = f"{recipe.image_prompt}, no text, no letters, no signature, no watermark"
+    recipe.image_prompt = _with_layout_diversity(recipe.image_prompt)
+    recipe.negative_prompt = _with_negative_layouts(recipe.negative_prompt)
     return recipe
+
+
+def _with_layout_diversity(prompt: str) -> str:
+    guidance = (
+        "asymmetric composition, no four-panel grid, no equal quadrant layout, "
+        "avoid centered tiled panels, one clear non-grid spatial strategy"
+    )
+    lowered = prompt.lower()
+    if "four-panel" in lowered or "quadrant" in lowered or "non-grid" in lowered:
+        return prompt
+    return f"{prompt}, {guidance}"
+
+
+def _with_negative_layouts(negative_prompt: str) -> str:
+    additions = [
+        "four equal panels",
+        "four-quadrant grid",
+        "split-screen",
+        "tiled layout",
+        "collage grid",
+        "comic panels",
+        "centered block grid",
+    ]
+    lowered = negative_prompt.lower()
+    missing = [item for item in additions if item not in lowered]
+    if not missing:
+        return negative_prompt
+    return f"{negative_prompt}, {', '.join(missing)}"
 
 
 def _uses_stock_explanation(text: str) -> bool:

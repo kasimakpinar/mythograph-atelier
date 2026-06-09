@@ -410,12 +410,13 @@ def _target_from_turn(turn: ConversationTurn) -> str:
 def _allowed_control_kinds(fallback_turn: ConversationTurn) -> list[str]:
     if fallback_turn.is_ready:
         return [ControlKind.READY_BUTTON.value]
-    if not fallback_turn.controls:
-        return [ControlKind.TEXT_REFINEMENT.value]
-    expected = fallback_turn.controls[0].kind
-    if expected in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS}:
-        return [ControlKind.CHOICE_CARDS.value, ControlKind.MULTI_CHOICE_CARDS.value]
-    return [expected.value]
+    return [
+        ControlKind.TEXT_REFINEMENT.value,
+        ControlKind.CHOICE_CARDS.value,
+        ControlKind.MULTI_CHOICE_CARDS.value,
+        ControlKind.SLIDER_GROUP.value,
+        ControlKind.SWATCH_PICKER.value,
+    ]
 
 
 def _recent_choices(profile: InterviewProfile) -> list[str]:
@@ -461,10 +462,6 @@ def sanitize_conversation_turn(
     if control.kind == ControlKind.READY_BUTTON:
         raise ValueError("model requested ready_button before profile was ready")
 
-    expected_kind = _expected_control_kind(fallback_turn)
-    if expected_kind and not _control_kind_matches_stage(control.kind, expected_kind):
-        raise ValueError(f"model chose {control.kind.value}; expected {expected_kind.value} for this stage")
-
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
         control.options = _sanitize_options(control.options, _recent_choices(profile), profile)
     elif control.kind == ControlKind.SLIDER_GROUP:
@@ -483,19 +480,33 @@ def sanitize_conversation_turn(
 
 def _ready_message(profile: InterviewProfile) -> str:
     idea = _first_nonempty(profile.ideas + profile.free_notes)
-    fragment = _short_fragment(idea) if idea else "this feeling"
-    return f"I have enough to make {fragment} visible as an abstract painting."
+    fragment = _clean_idea_fragment(idea) if idea else "this feeling"
+    return f"I have enough to turn {fragment} into an abstract painting."
+
+
+def _clean_idea_fragment(text: str) -> str:
+    fragment = _short_fragment(text)
+    lowered = fragment.lower()
+    prefixes = [
+        "i want something about ",
+        "i want something ",
+        "something about ",
+        "i want ",
+    ]
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            fragment = fragment[len(prefix) :].strip()
+            break
+    return fragment or "this feeling"
 
 
 def _polish_assistant_message(candidate: ConversationTurn, profile: InterviewProfile) -> str:
     message = " ".join(candidate.assistant_message.strip().split())
     control = candidate.controls[0] if candidate.controls else None
     normalized = _normalize_text(message).rstrip("?")
-    too_thin = len(message.split()) <= 3
+    too_thin = len(message.split()) <= 3 or len(message) < 22
     repeated = normalized in {_normalize_text(question).rstrip("?") for question in profile.asked_questions[-5:]}
-    main_words = set(_normalize_text(_first_nonempty(profile.ideas)).split())
-    overlap = len(main_words.intersection(set(normalized.split()))) >= 2 if main_words else False
-    if not control or (not too_thin and not repeated and not overlap):
+    if not control or (not too_thin and not repeated):
         return message
     if control.kind == ControlKind.SLIDER_GROUP:
         return "How should that feeling move across the canvas?"
