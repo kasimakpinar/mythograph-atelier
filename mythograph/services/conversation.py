@@ -96,11 +96,13 @@ def choose_conversation_turn_with_model(
         encoding="utf-8"
     )
     started = time.perf_counter()
+    can_generate = _model_can_generate(profile)
     payload = {
         "atelier_state": build_atelier_state(profile),
-        "next_need": _next_need_from_turn(fallback_turn),
-        "can_generate": fallback_turn.is_ready,
-        "allowed_control_kinds": _allowed_control_kinds(fallback_turn),
+        "next_need": _next_need_for_model(profile, fallback_turn),
+        "can_generate": can_generate,
+        "conversation_budget": "Aim for a useful artwork brief in 4-8 total user interactions. Continue only when the next answer will materially improve the painting.",
+        "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
         "control_guidance": {
             "choice_cards": "3-5 fresh, specific options for one choice.",
             "multi_choice_cards": "3-5 fresh, specific options; user may pick two.",
@@ -113,7 +115,7 @@ def choose_conversation_turn_with_model(
     response = llm.complete_json(
         system_prompt,
         payload,
-        max_tokens=LLM_CHAT_MAX_TOKENS,
+        max_tokens=max(LLM_CHAT_MAX_TOKENS, 180),
         response_format={"type": "json_object"},
     )
 
@@ -148,25 +150,25 @@ def choose_conversation_turn_with_model(
         candidate = ConversationTurn.model_validate(
             _normalize_turn_payload(extract_json_object(response.content), fallback_turn)
         )
-        candidate = sanitize_conversation_turn(candidate, fallback_turn, profile)
+        candidate = sanitize_conversation_turn(candidate, fallback_turn, profile, can_generate)
     except Exception as exc:
         repair_response = llm.complete_json(
             _repair_system_prompt(),
             {
                 "invalid_json": response.content,
                 "required_shape": "ConversationTurn JSON with assistant_message, progress_label, reason, is_ready, controls.",
-                "next_need": _next_need_from_turn(fallback_turn),
-                "can_generate": fallback_turn.is_ready,
-                "allowed_control_kinds": _allowed_control_kinds(fallback_turn),
+                "next_need": _next_need_for_model(profile, fallback_turn),
+                "can_generate": can_generate,
+                "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
             },
-            max_tokens=LLM_CHAT_MAX_TOKENS,
+            max_tokens=max(LLM_CHAT_MAX_TOKENS, 180),
             response_format={"type": "json_object"},
         )
         try:
             candidate = ConversationTurn.model_validate(
                 _normalize_turn_payload(extract_json_object(repair_response.content), fallback_turn)
             )
-            candidate = sanitize_conversation_turn(candidate, fallback_turn, profile)
+            candidate = sanitize_conversation_turn(candidate, fallback_turn, profile, can_generate)
         except Exception as repair_exc:
             elapsed_seconds = round(time.perf_counter() - started, 3)
             raw_content = repair_response.content or response.content
@@ -260,7 +262,7 @@ def _repair_system_prompt() -> str:
     return (
         "Return only valid JSON for Mythograph Atelier. No markdown. "
         "Keep one control only. Use allowed kind names exactly. "
-        "Use next_need.preferred_control_kind unless can_generate is true. "
+        "Choose a useful semantic control from allowed_control_kinds. "
         "Do not repeat previous user answers as options. "
         "Do not output styling, layout, CSS, HTML, Gradio code, or frontend instructions. "
         "If unsure, use text_refinement with empty options and sliders."
@@ -289,6 +291,9 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
 def _normalize_turn_payload(payload: dict, fallback_turn: ConversationTurn) -> dict:
     if not isinstance(payload, dict):
         return payload
+    payload["assistant_message"] = str(payload.get("assistant_message", "")).strip() or fallback_turn.assistant_message
+    payload["progress_label"] = str(payload.get("progress_label", "")).strip() or _fallback_progress_label(payload, fallback_turn)
+    payload["reason"] = str(payload.get("reason", "")).strip() or "model chose the next atelier move"
     controls = payload.get("controls")
     if not isinstance(controls, list) or not controls:
         return payload
@@ -297,6 +302,7 @@ def _normalize_turn_payload(payload: dict, fallback_turn: ConversationTurn) -> d
     if not isinstance(control, dict):
         return payload
 
+    control["label"] = str(control.get("label", "")).strip() or _label_from_kind(control.get("kind"))
     if not str(control.get("prompt", "")).strip():
         control["prompt"] = _prompt_from_control(control, payload, fallback_turn)
 
@@ -321,6 +327,26 @@ def _normalize_turn_payload(payload: dict, fallback_turn: ConversationTurn) -> d
     return payload
 
 
+def _fallback_progress_label(payload: dict, fallback_turn: ConversationTurn) -> str:
+    if payload.get("is_ready"):
+        return "Ready"
+    if fallback_turn.progress_label:
+        return f"Listening: {fallback_turn.progress_label.split(':', 1)[0].lower()}"
+    return "Listening"
+
+
+def _label_from_kind(kind: object) -> str:
+    labels = {
+        ControlKind.CHOICE_CARDS.value: "Choose one",
+        ControlKind.MULTI_CHOICE_CARDS.value: "Choose what fits",
+        ControlKind.SLIDER_GROUP.value: "Tune the image",
+        ControlKind.SWATCH_PICKER.value: "Choose color",
+        ControlKind.TEXT_REFINEMENT.value: "Your words",
+        ControlKind.READY_BUTTON.value: "Create artwork",
+    }
+    return labels.get(str(kind), "Atelier choice")
+
+
 def _prompt_from_control(control: dict, payload: dict, fallback_turn: ConversationTurn) -> str:
     for key in ("prompt", "label"):
         value = str(control.get(key, "")).strip()
@@ -336,7 +362,7 @@ def _prompt_from_control(control: dict, payload: dict, fallback_turn: Conversati
 
 def _normalize_slider_payload(sliders: object, control: dict) -> list[dict]:
     if isinstance(sliders, list) and sliders and all(isinstance(slider, dict) for slider in sliders):
-        return sliders[:3]
+        return [_normalize_slider_dict(slider, index) for index, slider in enumerate(sliders[:3])]
 
     if isinstance(sliders, list) and sliders and all(isinstance(slider, str) for slider in sliders):
         return [_slider_from_name(name, index) for index, name in enumerate(sliders[:3])]
@@ -346,14 +372,26 @@ def _normalize_slider_payload(sliders: object, control: dict) -> list[dict]:
     right_label = str(control.get("right_label", "")).strip() or "bright"
     value = control.get("value", 50)
     return [
-        {
+        _normalize_slider_dict({
             "key": _slider_key(label),
             "label": label,
             "left_label": left_label,
             "right_label": right_label,
             "value": value,
-        }
+        }, 0)
     ]
+
+
+def _normalize_slider_dict(slider: dict, index: int) -> dict:
+    label = str(slider.get("label", "")).strip() or str(slider.get("key", "")).strip() or f"Slider {index + 1}"
+    key = str(slider.get("key", "")).strip() or _slider_key(label)
+    return {
+        "key": _slider_key(key),
+        "label": label,
+        "left_label": str(slider.get("left_label", "")).strip() or "less",
+        "right_label": str(slider.get("right_label", "")).strip() or "more",
+        "value": int(float(slider.get("value", 50) or 50)),
+    }
 
 
 def _slider_from_name(name: str, index: int) -> dict:
@@ -381,13 +419,49 @@ def _slider_key(value: str) -> str:
     return "".join(char for char in key if char.isalnum() or char == "_") or "slider"
 
 
-def _next_need_from_turn(turn: ConversationTurn) -> dict:
+def _next_need_for_model(profile: InterviewProfile, turn: ConversationTurn) -> dict:
     control = turn.controls[0] if turn.controls else None
     return {
-        "target": _target_from_turn(turn),
-        "reason": turn.reason,
+        "target": _open_interview_target(profile, turn),
+        "reason": _open_interview_reason(profile, turn),
         "preferred_control_kind": control.kind.value if control else ControlKind.TEXT_REFINEMENT.value,
+        "missing_signals": _missing_signals(profile),
+        "director_note": "This is a suggestion, not a stage. Choose the next move that feels most alive and useful.",
     }
+
+
+def _model_can_generate(profile: InterviewProfile) -> bool:
+    has_personal_meaning = profile.scores.idea_anchor >= 0.55
+    has_visual_signal = profile.scores.visual_taste >= 0.18 or bool(profile.styles) or bool(profile.visual_preferences)
+    has_image_anchor = bool(profile.symbols) or len(profile.ideas + profile.free_notes) >= 3
+    return profile.turn_count >= 3 and has_personal_meaning and has_visual_signal and has_image_anchor
+
+
+def _missing_signals(profile: InterviewProfile) -> list[str]:
+    missing: list[str] = []
+    if profile.scores.idea_anchor < 0.55:
+        missing.append("personal meaning in the user's own words")
+    if not profile.symbols and len(profile.ideas + profile.free_notes) < 3:
+        missing.append("one concrete image, memory, object, gesture, or metaphor")
+    if profile.scores.visual_taste < 0.18 and not profile.styles and not profile.visual_preferences:
+        missing.append("visual direction such as atmosphere, composition, palette, texture, or energy")
+    if profile.turn_count < 3:
+        missing.append("one more exchange before generation")
+    return missing
+
+
+def _open_interview_target(profile: InterviewProfile, turn: ConversationTurn) -> str:
+    missing = _missing_signals(profile)
+    if not missing:
+        return "decide whether to generate or ask one high-value follow-up"
+    return missing[0]
+
+
+def _open_interview_reason(profile: InterviewProfile, turn: ConversationTurn) -> str:
+    missing = _missing_signals(profile)
+    if missing:
+        return f"The artwork brief still needs {missing[0]}."
+    return "The profile has enough signal; only continue if a sharper connection is worth it."
 
 
 def _target_from_turn(turn: ConversationTurn) -> str:
@@ -407,16 +481,17 @@ def _target_from_turn(turn: ConversationTurn) -> str:
     return "main_idea"
 
 
-def _allowed_control_kinds(fallback_turn: ConversationTurn) -> list[str]:
-    if fallback_turn.is_ready:
-        return [ControlKind.READY_BUTTON.value]
-    return [
+def _allowed_control_kinds(fallback_turn: ConversationTurn, can_generate: bool = False) -> list[str]:
+    kinds = [
         ControlKind.TEXT_REFINEMENT.value,
         ControlKind.CHOICE_CARDS.value,
         ControlKind.MULTI_CHOICE_CARDS.value,
         ControlKind.SLIDER_GROUP.value,
         ControlKind.SWATCH_PICKER.value,
     ]
+    if can_generate:
+        kinds.append(ControlKind.READY_BUTTON.value)
+    return kinds
 
 
 def _recent_choices(profile: InterviewProfile) -> list[str]:
@@ -436,15 +511,20 @@ def sanitize_conversation_turn(
     candidate: ConversationTurn,
     fallback_turn: ConversationTurn,
     profile: InterviewProfile,
+    can_generate: bool | None = None,
 ) -> ConversationTurn:
     if not candidate.controls:
         raise ValueError("model response did not include a control")
     candidate.controls = [candidate.controls[0]]
     control = candidate.controls[0]
 
-    if candidate.is_ready and not fallback_turn.is_ready:
+    if can_generate is None:
+        can_generate = fallback_turn.is_ready
+
+    if control.kind != ControlKind.READY_BUTTON:
         candidate.is_ready = False
-    if fallback_turn.is_ready:
+
+    if control.kind == ControlKind.READY_BUTTON and can_generate:
         candidate.is_ready = True
         candidate.assistant_message = _ready_message(profile)
         candidate.progress_label = "Ready: create the painting"
@@ -459,7 +539,7 @@ def sanitize_conversation_turn(
         ]
         return candidate
 
-    if control.kind == ControlKind.READY_BUTTON:
+    if control.kind == ControlKind.READY_BUTTON and not can_generate:
         raise ValueError("model requested ready_button before profile was ready")
 
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
@@ -485,7 +565,7 @@ def _ready_message(profile: InterviewProfile) -> str:
 
 
 def _clean_idea_fragment(text: str) -> str:
-    fragment = _short_fragment(text)
+    fragment = " ".join((text or "").strip().split())
     lowered = fragment.lower()
     prefixes = [
         "i want something about ",
@@ -497,6 +577,8 @@ def _clean_idea_fragment(text: str) -> str:
         if lowered.startswith(prefix):
             fragment = fragment[len(prefix) :].strip()
             break
+    if len(fragment) > 140:
+        fragment = fragment[:137].rstrip(" ,.;:") + "."
     return fragment or "this feeling"
 
 
@@ -638,6 +720,8 @@ def apply_control_response(profile: InterviewProfile, response: ControlResponse)
 
     if response.kind == ControlKind.MULTI_CHOICE_CARDS:
         if all(value in SYMBOL_OPTIONS for value in values):
+            profile.symbols.extend(values)
+        elif _looks_like_model_symbol_choice(profile, response):
             profile.symbols.extend(values)
         else:
             profile.ideas.extend(values)
@@ -827,7 +911,11 @@ def _looks_like_model_symbol_choice(profile: InterviewProfile, response: Control
     if response is None:
         return False
     label = _response_context(response)
-    return any(word in label for word in ["symbol", "anchor", "object", "shape", "image", "motif"])
+    if any(word in label for word in ["symbol", "anchor", "object", "shape", "image", "motif", "ingredient"]):
+        return True
+    values = [value.strip().lower() for value in response.values if value.strip()]
+    concrete_noun_phrase = any(value.startswith(("a ", "an ", "the ")) for value in values)
+    return profile.scores.idea_anchor >= 0.5 and concrete_noun_phrase and not profile.symbols
 
 
 def _looks_like_model_contrast_choice(profile: InterviewProfile, response: ControlResponse | None) -> bool:
@@ -838,7 +926,7 @@ def _looks_like_model_contrast_choice(profile: InterviewProfile, response: Contr
 
 
 def _response_context(response: ControlResponse) -> str:
-    return _normalize_text(" ".join(response.values + [response.text]))
+    return _normalize_text(" ".join(response.values + [response.text, response.label, response.prompt]))
 
 
 def _idea_options_for(profile: InterviewProfile) -> list[str]:

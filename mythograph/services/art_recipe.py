@@ -68,9 +68,9 @@ def build_art_recipe(profile: InterviewProfile, regeneration_instruction: str | 
     visual_style = _visual_style_sentence(profile, style, regeneration_instruction)
     composition = _composition_sentence(profile, symbol_names)
     image_prompt = (
-        f"Abstract contemporary painting, {visual_style}, palette {', '.join(palette)}, "
+        f"Single-canvas abstract contemporary painting, landscape format, {visual_style}, palette {', '.join(palette)}, "
         f"{composition}. Visual symbols: {', '.join(symbol.visual for symbol in symbols)}. "
-        f"Main idea: {idea}. Museum-quality abstract wall art, balanced negative space, expressive texture, "
+        f"Main idea: {idea}. Expressive texture, intentional negative space, non-grid spatial tension, "
         f"no text, no letters, no words, no signature, no watermark."
     )
     explanation = _friend_explanation(idea, symbols, regeneration_instruction)
@@ -128,7 +128,7 @@ def build_art_recipe_with_model(
                 "friend_explanation": "short personal explanation",
             },
         },
-        max_tokens=LLM_RECIPE_MAX_TOKENS,
+        max_tokens=max(LLM_RECIPE_MAX_TOKENS, 340),
         response_format={"type": "json_object"},
     )
     elapsed_seconds = round(time.perf_counter() - started, 3)
@@ -173,7 +173,7 @@ def build_art_recipe_with_model(
                 "invalid_json": response.content,
                 "fallback_recipe": fallback.model_dump(),
             },
-            max_tokens=LLM_RECIPE_MAX_TOKENS,
+            max_tokens=max(LLM_RECIPE_MAX_TOKENS, 340),
             response_format={"type": "json_object"},
         )
         try:
@@ -241,6 +241,13 @@ def _repair_recipe_prompt() -> str:
 def _normalize_recipe_payload(payload: dict, profile: InterviewProfile) -> dict:
     if not isinstance(payload, dict):
         return payload
+    fallback = build_art_recipe(profile)
+    payload["title"] = str(payload.get("title", "")).strip() or fallback.title
+    payload["main_idea"] = str(payload.get("main_idea", "")).strip() or fallback.main_idea
+    payload["visual_style"] = str(payload.get("visual_style", "")).strip() or fallback.visual_style
+    payload["composition"] = str(payload.get("composition", "")).strip() or fallback.composition
+    if not isinstance(payload.get("palette"), list) or not payload["palette"]:
+        payload["palette"] = fallback.palette
     symbols = payload.get("symbols")
     if not isinstance(symbols, list):
         symbols = []
@@ -257,11 +264,31 @@ def _normalize_recipe_payload(payload: dict, profile: InterviewProfile) -> dict:
         if all(existing["visual"].lower() != symbol.visual.lower() for existing in normalized_symbols):
             normalized_symbols.append(symbol.model_dump())
     payload["symbols"] = normalized_symbols[:6]
+    payload["image_prompt"] = str(payload.get("image_prompt", "")).strip() or _image_prompt_from_partial(payload, fallback)
     if not payload.get("negative_prompt"):
         payload["negative_prompt"] = "text, letters, words, signature, watermark, literal portrait, photorealistic scene"
     if not payload.get("friend_explanation"):
-        payload["friend_explanation"] = _personal_connection_explanation(profile, ArtRecipe.model_validate(build_art_recipe(profile).model_dump()))
+        payload["friend_explanation"] = _personal_connection_explanation(profile, ArtRecipe.model_validate(fallback.model_dump()))
     return payload
+
+
+def _image_prompt_from_partial(payload: dict, fallback: ArtRecipe) -> str:
+    style = str(payload.get("visual_style", "")).strip() or fallback.visual_style
+    composition = str(payload.get("composition", "")).strip() or fallback.composition
+    idea = str(payload.get("main_idea", "")).strip() or fallback.main_idea
+    visual_symbols = []
+    symbols = payload.get("symbols")
+    if isinstance(symbols, list):
+        for symbol in symbols:
+            if isinstance(symbol, dict) and str(symbol.get("visual", "")).strip():
+                visual_symbols.append(str(symbol["visual"]).strip())
+    if not visual_symbols:
+        visual_symbols = [symbol.visual for symbol in fallback.symbols[:3]]
+    return (
+        f"Single-canvas abstract contemporary painting, landscape format, {style}, {composition}. "
+        f"Visual symbols: {', '.join(visual_symbols)}. Main idea: {idea}. "
+        "No grid, no panels, no text, expressive texture, intentional negative space."
+    )
 
 
 def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: ArtRecipe) -> ArtRecipe:
@@ -386,18 +413,27 @@ def _personal_connection_explanation(profile: InterviewProfile, recipe: ArtRecip
         )
     if chosen:
         return (
-            f"The painting gives {idea.lower()} a body: {chosen.lower()} become rhythm, distance, and color. "
+            f"The painting gives {_clean_idea_for_explanation(idea)} a body: {chosen.lower()} become rhythm, distance, and color. "
             f"It works when the viewer feels those abstract marks answer something they already carried in quietly."
         )
     if palette:
         return (
-            f"The {palette} atmosphere lets {idea.lower()} stay quiet without becoming vague. "
+            f"The {palette} atmosphere lets {_clean_idea_for_explanation(idea)} stay quiet without becoming vague. "
             f"The connection happens when the viewer recognizes the mood before they can name it."
         )
     return (
-        f"The painting gives {idea.lower()} a place to live outside language. "
+        f"The painting gives {_clean_idea_for_explanation(idea)} a place to live outside language. "
         f"Its meaning arrives when the abstract space feels strangely familiar to the person looking at it."
     )
+
+
+def _clean_idea_for_explanation(idea: str) -> str:
+    clean = " ".join((idea or "").strip().split())
+    lowered = clean.lower()
+    for prefix in ["i want something about ", "i want something ", "something about ", "i want "]:
+        if lowered.startswith(prefix):
+            return clean[len(prefix) :].strip().lower() or clean.lower()
+    return clean.lower()
 
 
 def _adjust_style(style: str, instruction: str) -> str:
@@ -441,10 +477,17 @@ def _visual_style_sentence(profile: InterviewProfile, style: str, regeneration_i
 
 
 def _composition_sentence(profile: InterviewProfile, symbols: list[str]) -> str:
-    prefs = profile.visual_preferences
-    if prefs.get("geometric_organic", 45) < 55:
-        return f"asymmetric blocks crossed by {symbols[0]} with a quiet field of empty space"
-    return f"flowing layered forms orbiting {symbols[0]} with textured edges and one clear focal opening"
+    strategies = [
+        f"an off-center field pulled toward the lower right by {symbols[0]}, with a long quiet margin above it",
+        f"a diagonal drift of interrupted marks around {symbols[0]}, leaving one open path through the canvas",
+        f"a low horizon of pressure with {symbols[0]} suspended above it and sparse echoes near the edges",
+        f"a broken ring of texture orbiting {symbols[0]}, with the center deliberately left unresolved",
+        f"a cascade of thin fields descending from one edge, interrupted by {symbols[0]} before it reaches the center",
+        f"one dense corner pushing against a wide empty field, with {symbols[0]} acting as the hinge",
+    ]
+    signature = "|".join(profile.ideas + profile.symbols + profile.free_notes + [str(profile.visual_preferences)])
+    index = sum(ord(char) for char in signature) % len(strategies)
+    return strategies[index]
 
 
 def _friend_explanation(idea: str, symbols: list[Symbol], regeneration_instruction: str | None) -> str:

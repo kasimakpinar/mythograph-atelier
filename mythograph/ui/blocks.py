@@ -106,7 +106,8 @@ def build_demo() -> gr.Blocks:
                     refine_text = gr.Textbox(
                         label="",
                         placeholder="Add one sentence, or name a feeling, symbol, memory, or contradiction.",
-                        lines=2,
+                        lines=1,
+                        max_lines=1,
                         show_label=False,
                     )
                     refine_submit = gr.Button("Add this", variant="primary")
@@ -212,6 +213,11 @@ def build_demo() -> gr.Blocks:
             inputs=[profile_state, chat_history_state, refine_text],
             outputs=flow_outputs,
         )
+        refine_text.submit(
+            fn=_submit_text,
+            inputs=[profile_state, chat_history_state, refine_text],
+            outputs=flow_outputs,
+        )
 
         for button, (_title, text) in zip(starter_buttons, STARTER_CHIPS, strict=True):
             starter_text_state = gr.State(text)
@@ -223,22 +229,22 @@ def build_demo() -> gr.Blocks:
 
         choice_submit.click(
             fn=_submit_choice,
-            inputs=[profile_state, chat_history_state, choice_cards],
+            inputs=[profile_state, chat_history_state, turn_state, choice_cards],
             outputs=flow_outputs,
         )
         multi_submit.click(
             fn=_submit_multi,
-            inputs=[profile_state, chat_history_state, multi_cards],
+            inputs=[profile_state, chat_history_state, turn_state, multi_cards],
             outputs=flow_outputs,
         )
         slider_submit.click(
             fn=_submit_sliders,
-            inputs=[profile_state, chat_history_state, minimal_rich, calm_intense, geometric_organic],
+            inputs=[profile_state, chat_history_state, turn_state, minimal_rich, calm_intense, geometric_organic],
             outputs=flow_outputs,
         )
         swatch_submit.click(
             fn=_submit_swatch,
-            inputs=[profile_state, chat_history_state, swatch_picker],
+            inputs=[profile_state, chat_history_state, turn_state, swatch_picker],
             outputs=flow_outputs,
         )
         ready_event = ready_button.click(
@@ -322,37 +328,94 @@ def _submit_starter(profile_data: dict, history: list[dict], text: str):
     yield _render(profile, chat, turn, activity=_activity_for_turn(turn, "GPU text model done."))
 
 
-def _submit_choice(profile_data: dict, history: list[dict], value: str | None):
-    response = ControlResponse(kind=ControlKind.CHOICE_CARDS, values=[value] if value else [])
+def _submit_choice(profile_data: dict, history: list[dict], turn_data: dict, value: str | None):
+    control = _current_control(turn_data)
+    response = ControlResponse(
+        kind=ControlKind.CHOICE_CARDS,
+        values=[value] if value else [],
+        label=control.label if control else "",
+        prompt=control.prompt if control else "",
+    )
     yield from _submit_control(profile_data, history, response, value or "I am not sure yet.")
 
 
-def _submit_multi(profile_data: dict, history: list[dict], values: list[str] | None):
+def _submit_multi(profile_data: dict, history: list[dict], turn_data: dict, values: list[str] | None):
+    control = _current_control(turn_data)
     chosen = values or []
-    response = ControlResponse(kind=ControlKind.MULTI_CHOICE_CARDS, values=chosen)
+    response = ControlResponse(
+        kind=ControlKind.MULTI_CHOICE_CARDS,
+        values=chosen,
+        label=control.label if control else "",
+        prompt=control.prompt if control else "",
+    )
     yield from _submit_control(profile_data, history, response, " | ".join(chosen) if chosen else "I am not sure yet.")
 
 
 def _submit_sliders(
     profile_data: dict,
     history: list[dict],
+    turn_data: dict,
     minimal_rich: float,
     calm_intense: float,
     geometric_organic: float,
 ):
-    sliders = {
-        "minimal_rich": minimal_rich,
-        "calm_intense": calm_intense,
-        "geometric_organic": geometric_organic,
-    }
-    response = ControlResponse(kind=ControlKind.SLIDER_GROUP, sliders=sliders)
-    summary = f"Density {minimal_rich:.0f}, energy {calm_intense:.0f}, shape {geometric_organic:.0f}."
+    control = _current_control(turn_data)
+    values = [minimal_rich, calm_intense, geometric_organic]
+    sliders = _slider_response_values(control, values)
+    response = ControlResponse(
+        kind=ControlKind.SLIDER_GROUP,
+        sliders=sliders,
+        label=control.label if control else "",
+        prompt=control.prompt if control else "",
+    )
+    summary = _slider_summary(control, sliders)
     yield from _submit_control(profile_data, history, response, summary)
 
 
-def _submit_swatch(profile_data: dict, history: list[dict], value: str | None):
-    response = ControlResponse(kind=ControlKind.SWATCH_PICKER, values=[value] if value else [])
+def _submit_swatch(profile_data: dict, history: list[dict], turn_data: dict, value: str | None):
+    control = _current_control(turn_data)
+    response = ControlResponse(
+        kind=ControlKind.SWATCH_PICKER,
+        values=[value] if value else [],
+        label=control.label if control else "",
+        prompt=control.prompt if control else "",
+    )
     yield from _submit_control(profile_data, history, response, value or "Surprise me.")
+
+
+def _current_control(turn_data: dict):
+    try:
+        turn = _turn(turn_data)
+    except Exception:
+        return None
+    return turn.controls[0] if turn.controls else None
+
+
+def _slider_response_values(control, values: list[float]) -> dict[str, float]:
+    if not control or not control.sliders:
+        return {
+            "minimal_rich": values[0],
+            "calm_intense": values[1],
+            "geometric_organic": values[2],
+        }
+    sliders: dict[str, float] = {}
+    for index, slider in enumerate(control.sliders[:3]):
+        sliders[slider.key] = values[index]
+    return sliders
+
+
+def _slider_summary(control, sliders: dict[str, float]) -> str:
+    if not control or not control.sliders:
+        return (
+            f"Density {sliders.get('minimal_rich', 0):.0f}, "
+            f"energy {sliders.get('calm_intense', 0):.0f}, "
+            f"shape {sliders.get('geometric_organic', 0):.0f}."
+        )
+    parts = []
+    for slider in control.sliders[:3]:
+        value = sliders.get(slider.key, slider.value)
+        parts.append(f"{slider.label} {value:.0f}")
+    return ", ".join(parts) + "."
 
 
 def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):

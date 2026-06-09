@@ -25,7 +25,7 @@ class FakeClient:
                 ),
                 source="local",
             )
-        assert max_tokens == LLM_RECIPE_MAX_TOKENS
+        assert max_tokens == max(LLM_RECIPE_MAX_TOKENS, 340)
         assert response_format == {"type": "json_object"}
         assert "fallback_recipe" not in user_payload
         assert "connection_principle" in user_payload

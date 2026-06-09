@@ -53,7 +53,7 @@ def update_scores(profile: InterviewProfile) -> InterviewProfile:
         and profile.scores.idea_anchor >= 0.5
         and profile.scores.visual_taste >= 0.45
         and profile.scores.symbolic_material >= 0.35
-    ) or profile.turn_count >= 5
+    )
     return profile
 
 

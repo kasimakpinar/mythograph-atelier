@@ -11,7 +11,7 @@ import mythograph.services.conversation as conversation
 
 class GoodClient:
     def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
-        assert max_tokens == conversation.LLM_CHAT_MAX_TOKENS
+        assert max_tokens == max(conversation.LLM_CHAT_MAX_TOKENS, 180)
         assert response_format == {"type": "json_object"}
         if "invalid_json" in user_payload:
             return LLMResponse(content=user_payload["invalid_json"], source="llamacpp")

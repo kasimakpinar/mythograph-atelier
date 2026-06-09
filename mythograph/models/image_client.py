@@ -48,7 +48,8 @@ class ImageClient:
             try:
                 import torch
 
-                image_kwargs["generator"] = torch.Generator(device="cuda").manual_seed(IMAGE_SEED)
+                if IMAGE_SEED > 0:
+                    image_kwargs["generator"] = torch.Generator(device="cuda").manual_seed(IMAGE_SEED)
             except Exception:
                 pass
 

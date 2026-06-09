@@ -60,3 +60,5 @@ class ControlResponse(BaseModel):
     values: list[str] = Field(default_factory=list)
     text: str = ""
     sliders: dict[str, float] = Field(default_factory=dict)
+    label: str = ""
+    prompt: str = ""
