@@ -5,14 +5,15 @@ from mythograph.config import APP_TITLE, IMAGE_HEIGHT, IMAGE_WIDTH, ROOT_DIR
 from mythograph.models.image_client import ImageClient
 from mythograph.models.llm_client import LlamaCppClient, preload_llamacpp_if_configured, runtime_status
 from mythograph.schemas.profile import InterviewProfile
-from mythograph.schemas.ui import ControlKind, ControlResponse, ConversationTurn
+from mythograph.schemas.ui import ConversationStarter, ControlKind, ControlResponse, ConversationTurn
 from mythograph.services.art_recipe import build_art_recipe_with_model
 from mythograph.services.conversation import advance_conversation, model_error_turn, new_profile, start_session
+from mythograph.services.starters import fallback_starters, generate_conversation_starters
 from mythograph.services.trace_logger import export_trace, log_event
-from mythograph.ui.examples import REGENERATION_OPTIONS, STARTER_IDEAS
+from mythograph.ui.examples import REGENERATION_OPTIONS
 
 
-STARTER_CHIPS = STARTER_IDEAS[:3]
+STARTER_CHIPS = fallback_starters(6)
 
 
 def build_demo() -> gr.Blocks:
@@ -34,6 +35,7 @@ def build_demo() -> gr.Blocks:
         chat_history_state = gr.State([])
         turn_state = gr.State(initial_turn.model_dump())
         recipe_state = gr.State(None)
+        starter_state = gr.State([starter.model_dump() for starter in STARTER_CHIPS])
         generate_action_state = gr.State("generate")
         regenerate_action_state = gr.State("regenerate")
 
@@ -58,11 +60,12 @@ def build_demo() -> gr.Blocks:
             )
             with gr.Row(elem_classes=["ma-start-actions"]):
                 start_submit = gr.Button("Begin", variant="primary", elem_classes=["ma-send"])
+                refresh_starters = gr.Button("Refresh examples", elem_classes=["ma-ghost"])
                 reset_from_start = gr.Button("Reset", elem_classes=["ma-ghost"])
             with gr.Row(elem_classes=["ma-starters"]):
                 starter_buttons = [
-                    gr.Button(title, elem_classes=["ma-chip"], size="sm")
-                    for title, _text in STARTER_CHIPS
+                    gr.Button(starter.title, elem_classes=["ma-chip"], size="sm")
+                    for starter in STARTER_CHIPS
                 ]
 
         with gr.Group(visible=False, elem_id="ma-chat-panel") as chat_panel:
@@ -224,13 +227,19 @@ def build_demo() -> gr.Blocks:
             outputs=flow_outputs,
         )
 
-        for button, (_title, text) in zip(starter_buttons, STARTER_CHIPS, strict=True):
-            starter_text_state = gr.State(text)
+        for index, button in enumerate(starter_buttons):
+            starter_index_state = gr.State(index)
             button.click(
                 fn=_submit_starter,
-                inputs=[profile_state, chat_history_state, starter_text_state],
+                inputs=[profile_state, chat_history_state, starter_state, starter_index_state],
                 outputs=flow_outputs,
             )
+
+        refresh_starters.click(
+            fn=_refresh_starters,
+            inputs=[starter_state],
+            outputs=[starter_state, *starter_buttons],
+        )
 
         choice_submit.click(
             fn=_submit_choice,
@@ -330,7 +339,10 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
     yield _render(profile, chat, turn, activity=_activity_for_turn(turn, "GPU text model done."))
 
 
-def _submit_starter(profile_data: dict, history: list[dict], text: str):
+def _submit_starter(profile_data: dict, history: list[dict], starters_data: list[dict], index: int):
+    starters = _starter_models(starters_data)
+    starter = starters[index] if 0 <= int(index) < len(starters) else fallback_starters(1)[0]
+    text = starter.text
     director_history = (history or []) + [_message("user", text)]
     yield _thinking_render(_profile(profile_data), director_history, _thinking_label(history))
     profile_data, turn_data = _advance_conversation_on_gpu(profile_data, text, None)
@@ -338,6 +350,23 @@ def _submit_starter(profile_data: dict, history: list[dict], text: str):
     turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
     yield _render(profile, chat, turn, activity=_activity_for_turn(turn, "GPU text model done."))
+
+
+@spaces.GPU(duration=60)
+def _refresh_starters(starters_data: list[dict]):
+    starters = generate_conversation_starters(count=6)
+    updates = [gr.update(value=starter.title) for starter in starters]
+    return [[starter.model_dump() for starter in starters], *updates]
+
+
+def _starter_models(starters_data: list[dict] | None) -> list[ConversationStarter]:
+    starters: list[ConversationStarter] = []
+    for item in starters_data or []:
+        try:
+            starters.append(ConversationStarter.model_validate(item))
+        except Exception:
+            continue
+    return starters or fallback_starters(6)
 
 
 def _submit_choice(profile_data: dict, history: list[dict], turn_data: dict, value: str | None):
@@ -466,11 +495,10 @@ def _thinking_label(history: list[dict] | None) -> str:
 
 
 def _activity_for_turn(turn: ConversationTurn, default: str) -> str:
-    if turn.progress_label == "Model: retry needed":
+    if turn.reason.startswith("llama.cpp did not return valid schema JSON"):
         return (
-            "GPU text model returned an error before a valid UI turn could be shown.\n"
-            f"Detail: {turn.reason}\n"
-            "Use Download trace for the full raw runtime error."
+            "GPU text model needed the safe conversation fallback.\n"
+            "You can keep typing normally; Download trace has the raw runtime details."
         )
     return default
 

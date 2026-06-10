@@ -19,7 +19,7 @@ Mythograph Atelier is a Gradio app for Hugging Face's Build Small Hackathon. It 
 
 ## Current MVP
 
-- Chat-first dynamic interview with starter chips, assistant messages, and controls that appear only when needed.
+- Chat-first dynamic interview with AI-refreshable starter chips, assistant messages, and controls that appear only when needed.
 - No external inference APIs: `llama.cpp` runs the text model on ZeroGPU, and FLUX.2 Klein runs afterward on ZeroGPU for image generation.
 - Dynamic control tray for choice cards, multi-choice cards, visual sliders, palette mood, text refinement, and create readiness.
 - FLUX.2 Klein image generation with Pillow as a reliable fallback.

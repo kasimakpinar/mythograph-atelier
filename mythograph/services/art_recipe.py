@@ -113,9 +113,11 @@ def build_art_recipe_with_model(
     response = llm.complete_json(
         system_prompt,
         {
+            "task": "final_art_recipe",
             "profile": profile.model_dump(),
             "regeneration_instruction": regeneration_instruction,
             "connection_principle": "The meaning is the connection between this person and the abstract painting.",
+            "thinking_mode": LLAMACPP_RECIPE_THINKING,
             "required_shape": {
                 "title": "string",
                 "main_idea": "string",

@@ -27,6 +27,8 @@ class FakeClient:
         assert max_tokens == _recipe_token_budget()
         assert response_format == {"type": "json_object"}
         assert thinking is True
+        assert user_payload["task"] == "final_art_recipe"
+        assert user_payload["thinking_mode"] is True
         assert "fallback_recipe" not in user_payload
         assert "connection_principle" in user_payload
         return LLMResponse(

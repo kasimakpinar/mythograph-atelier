@@ -17,17 +17,22 @@ class GoodClient:
         if "invalid_json" in user_payload:
             return LLMResponse(content=user_payload["invalid_json"], source="llamacpp")
         assert "atelier_state" in user_payload
+        assert user_payload["task"] == "conversation_with_ui"
         assert "chat_history" not in user_payload
         assert "fallback_turn" not in user_payload
         assert "available_option_sets" not in user_payload
         assert "next_need" in user_payload
         assert "can_generate" in user_payload
         assert "preferred_control_kind" in user_payload["next_need"]
+        assert "goal" in user_payload["next_need"]
         assert "suggested_component" not in user_payload["next_need"]
         assert "choice_cards" in user_payload["allowed_control_kinds"]
         assert "text_refinement" in user_payload["allowed_control_kinds"]
         assert "swatch_picker" in user_payload["allowed_control_kinds"]
-        assert "ready_button" not in user_payload["allowed_control_kinds"]
+        if user_payload["can_generate"]:
+            assert "ready_button" in user_payload["allowed_control_kinds"]
+        else:
+            assert "ready_button" not in user_payload["allowed_control_kinds"]
         assert user_payload["controls_are_optional"] is True
         assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
         return LLMResponse(
@@ -187,6 +192,8 @@ class RepetitiveThenGoodClient:
 
 class ChatOnlyClient:
     def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
+        assert user_payload["task"] == "conversation_chat"
+        assert user_payload["allowed_control_kinds"] == []
         return LLMResponse(
             content=json.dumps(
                 {
@@ -209,6 +216,7 @@ def main() -> None:
         profile.ideas.append("I want something about patience.")
         profile.free_notes.append("quiet pressure")
         profile.free_notes.append("hidden order")
+        profile.turn_count = 3
         profile.visual_preferences.update({"minimal_rich": 35, "calm_intense": 45, "geometric_organic": 45})
         profile = conversation.update_scores(profile)
         fallback = conversation.choose_conversation_turn(profile)
@@ -225,13 +233,22 @@ def main() -> None:
         assert free_control.controls[0].kind == ControlKind.TEXT_REFINEMENT
         assert free_control.progress_label == "Listening: personal meaning"
 
-        chat_only = conversation.choose_conversation_turn_with_model(profile, fallback, ChatOnlyClient())
+        chat_profile = conversation.new_profile()
+        chat_profile.ideas.append("I want something about patience.")
+        chat_profile.turn_count = 1
+        chat_profile = conversation.update_scores(chat_profile)
+        chat_only = conversation.choose_conversation_turn_with_model(
+            chat_profile,
+            conversation.choose_conversation_turn(chat_profile),
+            ChatOnlyClient(),
+        )
         assert chat_only.controls == []
         assert "waiting feels hardest" in chat_only.assistant_message
 
         slider_profile = conversation.new_profile()
         slider_profile.ideas.extend(["I want something about being positive", "sharp"])
         slider_profile.free_notes.append("pulse")
+        slider_profile.turn_count = 3
         slider_profile = conversation.update_scores(slider_profile)
         slider_fallback = conversation.choose_conversation_turn(slider_profile)
         loose_slider = conversation.choose_conversation_turn_with_model(slider_profile, slider_fallback, LooseSliderClient())
@@ -246,8 +263,8 @@ def main() -> None:
         assert fresh.controls[0].options[0] == "quiet refusal"
 
         bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
-        assert bad.controls[0].kind == ControlKind.TEXT_REFINEMENT
-        assert bad.progress_label == "Model: retry needed"
+        assert bad.controls == []
+        assert bad.progress_label == "Understanding your theme"
     finally:
         conversation.CONVERSATION_MODE = original_mode
 

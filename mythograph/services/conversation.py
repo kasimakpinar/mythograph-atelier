@@ -97,13 +97,16 @@ def choose_conversation_turn_with_model(
     )
     started = time.perf_counter()
     can_generate = _model_can_generate(profile)
+    task = _conversation_task(profile, can_generate)
+    allowed_control_kinds = _allowed_control_kinds(fallback_turn, can_generate, task)
     payload = {
+        "task": task,
         "atelier_state": build_atelier_state(profile),
-        "next_need": _next_need_for_model(profile, fallback_turn),
+        "next_need": _next_need_for_model(profile, fallback_turn, task),
         "can_generate": can_generate,
         "conversation_budget": "Aim for a useful artwork brief in 3-5 meaningful exchanges. Keep chatting when the user's own words matter; use controls only when they help.",
         "controls_are_optional": True,
-        "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
+        "allowed_control_kinds": allowed_control_kinds,
         "control_guidance": {
             "empty_controls": "Use plain chat when a real question is better than buttons.",
             "choice_cards": "3-6 interpretations, emotional angles, stances, or readings.",
@@ -135,7 +138,7 @@ def choose_conversation_turn_with_model(
             candidate = ConversationTurn.model_validate(
                 _normalize_turn_payload(extract_json_object(current_response.content), fallback_turn)
             )
-            candidate = sanitize_conversation_turn(candidate, fallback_turn, profile, can_generate)
+            candidate = sanitize_conversation_turn(candidate, fallback_turn, profile, can_generate, allowed_control_kinds)
             quality_issue = _turn_quality_issue(candidate, profile)
             if quality_issue:
                 raise ValueError(quality_issue)
@@ -145,7 +148,7 @@ def choose_conversation_turn_with_model(
             if attempt >= max_attempts - 1:
                 elapsed_seconds = round(time.perf_counter() - started, 3)
                 error_turn = model_error_turn(
-                    "The text model drifted outside the UI schema. Try one sharper sentence.",
+                    "I want to keep this simple. Tell me a little more about what this theme means to you in real life.",
                     last_error,
                 )
                 log_event(
@@ -173,9 +176,9 @@ def choose_conversation_turn_with_model(
                     "previous_error": last_error,
                     "attempt": attempt + 1,
                     "required_shape": "ConversationTurn JSON with assistant_message, progress_label, reason, is_ready, controls.",
-                    "next_need": _next_need_for_model(profile, fallback_turn),
+                    "next_need": _next_need_for_model(profile, fallback_turn, task),
                     "can_generate": can_generate,
-                    "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
+                    "allowed_control_kinds": allowed_control_kinds,
                     "atelier_state": build_atelier_state(profile),
                     "quality_rules": _quality_rules_for_retry(profile),
                 },
@@ -203,7 +206,10 @@ def choose_conversation_turn_with_model(
         )
         return candidate
 
-    return model_error_turn("The text model drifted outside the UI schema. Try one sharper sentence.", last_error)
+    return model_error_turn(
+        "I want to keep this simple. Tell me a little more about what this theme means to you in real life.",
+        last_error,
+    )
 
 
 def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
@@ -212,16 +218,10 @@ def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
         reason = f"{reason}: {detail[:900]}"
     return ConversationTurn(
         assistant_message=message,
-        progress_label="Model: retry needed",
+        progress_label="Understanding your theme",
         reason=reason,
         is_ready=False,
-        controls=[
-            DynamicControl(
-                kind=ControlKind.TEXT_REFINEMENT,
-                label="Retry",
-                prompt="Send a shorter signal and the atelier will ask again.",
-            )
-        ],
+        controls=[],
     )
 
 
@@ -326,6 +326,14 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
         "already_chosen": _recent_choices(profile),
         "avoid_questions": profile.asked_questions[-5:],
         "avoid_options": profile.offered_options[-16:],
+        "avoid_phrases": [
+            "one more ingredient",
+            "I need one more thing",
+            "before the image can settle",
+            "choose the anchor",
+            "what visual language fits",
+            "what should stay unresolved",
+        ],
         "recent_control_kinds": _recent_control_kinds(profile),
     }
 
@@ -464,13 +472,36 @@ def _slider_key(value: str) -> str:
     return "".join(char for char in key if char.isalnum() or char == "_") or "slider"
 
 
-def _next_need_for_model(profile: InterviewProfile, turn: ConversationTurn) -> dict:
+def _conversation_task(profile: InterviewProfile, can_generate: bool) -> str:
+    if can_generate:
+        return "conversation_with_ui"
+    recent_controls = profile.control_history[-2:]
+    if profile.turn_count <= 1:
+        return "conversation_chat"
+    if len(recent_controls) >= 2:
+        return "conversation_chat"
+    if _user_seems_unsure(profile) or profile.turn_count % 3 == 0:
+        return "conversation_with_ui"
+    return "conversation_chat"
+
+
+def _user_seems_unsure(profile: InterviewProfile) -> bool:
+    text = " ".join(profile.ideas + profile.free_notes).lower()
+    markers = ["not sure", "don't know", "cannot explain", "can't explain", "maybe", "or ", "but also"]
+    return any(marker in text for marker in markers)
+
+
+def _next_need_for_model(profile: InterviewProfile, turn: ConversationTurn, task: str) -> dict:
+    should_use_ui = task == "conversation_with_ui"
     return {
-        "target": _open_interview_target(profile, turn),
+        "goal": _open_interview_target(profile, turn),
         "reason": _open_interview_reason(profile, turn),
+        "should_use_ui": should_use_ui,
         "preferred_control_kind": ControlKind.READY_BUTTON.value if _model_can_generate(profile) else None,
         "missing_signals": _missing_signals(profile),
-        "director_note": "This is guidance, not a stage. A natural chat question is often better than a UI control.",
+        "director_note": (
+            "Use plain chat unless a semantic UI control would genuinely help the user choose, compare, or continue."
+        ),
     }
 
 
@@ -525,7 +556,13 @@ def _target_from_turn(turn: ConversationTurn) -> str:
     return "main_idea"
 
 
-def _allowed_control_kinds(fallback_turn: ConversationTurn, can_generate: bool = False) -> list[str]:
+def _allowed_control_kinds(
+    fallback_turn: ConversationTurn,
+    can_generate: bool = False,
+    task: str = "conversation_with_ui",
+) -> list[str]:
+    if task == "conversation_chat" and not can_generate:
+        return []
     kinds = [
         ControlKind.TEXT_REFINEMENT.value,
         ControlKind.CHOICE_CARDS.value,
@@ -556,6 +593,7 @@ def sanitize_conversation_turn(
     fallback_turn: ConversationTurn,
     profile: InterviewProfile,
     can_generate: bool | None = None,
+    allowed_control_kinds: list[str] | None = None,
 ) -> ConversationTurn:
     if can_generate is None:
         can_generate = fallback_turn.is_ready
@@ -577,6 +615,11 @@ def sanitize_conversation_turn(
 
     candidate.controls = [candidate.controls[0]]
     control = candidate.controls[0]
+    allowed_control_kinds = allowed_control_kinds or []
+    if allowed_control_kinds and control.kind.value not in allowed_control_kinds:
+        raise ValueError(f"control kind {control.kind.value} was not allowed for this task")
+    if not allowed_control_kinds and control.kind != ControlKind.READY_BUTTON:
+        raise ValueError(f"task expected chat-only response but got {control.kind.value}")
 
     if control.kind != ControlKind.READY_BUTTON:
         candidate.is_ready = False

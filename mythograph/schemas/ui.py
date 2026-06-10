@@ -62,3 +62,12 @@ class ControlResponse(BaseModel):
     sliders: dict[str, float] = Field(default_factory=dict)
     label: str = ""
     prompt: str = ""
+
+
+class ConversationStarter(BaseModel):
+    title: str
+    text: str
+
+
+class ConversationStarters(BaseModel):
+    starters: list[ConversationStarter] = Field(default_factory=list)
