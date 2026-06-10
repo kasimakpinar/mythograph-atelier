@@ -66,8 +66,8 @@ MYTHOGRAPH_LLAMACPP_RECIPE_ENABLED=1
 MYTHOGRAPH_LLAMACPP_RECIPE_THINKING=1
 MYTHOGRAPH_LLAMACPP_UNLOAD_AFTER_CALL=0
 MYTHOGRAPH_LLAMACPP_FLASH_ATTN=0
-MYTHOGRAPH_LLM_CHAT_MAX_TOKENS=220
-MYTHOGRAPH_LLM_RECIPE_MAX_TOKENS=560
+MYTHOGRAPH_LLM_CHAT_MAX_TOKENS=420
+MYTHOGRAPH_LLM_RECIPE_MAX_TOKENS=1200
 MYTHOGRAPH_LLM_TEMPERATURE=0.55
 MYTHOGRAPH_CONVERSATION_MODE=model_assisted
 MYTHOGRAPH_IMAGE_MODE=flux
@@ -80,6 +80,10 @@ MYTHOGRAPH_IMAGE_CPU_OFFLOAD=1
 ```
 
 The default MVP path uses short GPU llama.cpp calls for creative chat turns, then enables Nemotron thinking for the final recipe only. Before FLUX renders, the app unloads llama.cpp and clears CUDA memory so image generation can own the next ZeroGPU allocation.
+
+## Waiting Gallery
+
+Waiting-state gallery entries live in `data/waiting_gallery.json`. Put replaceable static images in `data/gallery/` and point each entry's `image` field at that file, for example `data/gallery/my-study.png`. If an image path is missing, the app shows a styled placeholder card with the phrase.
 
 ## Model Architecture
 

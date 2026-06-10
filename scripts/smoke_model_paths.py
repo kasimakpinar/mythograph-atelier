@@ -35,6 +35,7 @@ class FakeClient:
             content=json.dumps(
                 {
                     "title": "Test Title",
+                    "central_phrase": "A quiet line can still know where it is going.",
                     "main_idea": "Test idea",
                     "visual_style": "minimal geometric",
                     "palette": ["#111111", "#eeeeee", "#b8872f"],
@@ -63,6 +64,7 @@ class PartialRecipeClient:
             content=json.dumps(
                 {
                     "title": "Bright Afterlight",
+                    "central_phrase": "Joy can arrive softly after the heavy part has passed.",
                     "main_idea": "joy arriving after a heavy mood",
                     "visual_style": "soft, organic, hushed",
                     "palette": ["#dfe8ee", "#f6d86b", "#263238"],
@@ -83,6 +85,7 @@ def main() -> None:
     next_ui = choose_next_ui_with_model(profile, FakeClient())
     recipe = build_art_recipe_with_model(profile, client=FakeClient())
     assert "is not decoration" not in recipe.friend_explanation.lower()
+    assert recipe.central_phrase
 
     bright_profile = new_profile()
     bright_profile.ideas.extend(["I want something about joy arriving after a heavy mood", "glow", "splash"])
@@ -91,6 +94,7 @@ def main() -> None:
     bright_recipe = build_art_recipe_with_model(bright_profile, client=PartialRecipeClient())
     assert len(bright_recipe.symbols) >= 3
     assert "is not decoration" not in bright_recipe.friend_explanation.lower()
+    assert bright_recipe.central_phrase
     print(next_ui.next_action)
     print(recipe.title)
 

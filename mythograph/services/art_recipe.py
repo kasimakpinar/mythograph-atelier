@@ -77,6 +77,7 @@ def build_art_recipe(profile: InterviewProfile, regeneration_instruction: str | 
 
     return ArtRecipe(
         title=title,
+        central_phrase=_central_phrase_from_profile(profile, idea),
         main_idea=idea,
         visual_style=visual_style,
         palette=palette,
@@ -118,8 +119,13 @@ def build_art_recipe_with_model(
             "regeneration_instruction": regeneration_instruction,
             "connection_principle": "The meaning is the connection between this person and the abstract painting.",
             "thinking_mode": LLAMACPP_RECIPE_THINKING,
+            "first_generation_guidance": (
+                "Make this first recipe as alive and specific as a strong surprise regeneration: preserve the user's meaning, "
+                "but choose a fresh central phrase, a clear visual hierarchy, and enough meaning links to make the image feel personal."
+            ),
             "required_shape": {
                 "title": "string",
+                "central_phrase": "quote, meaningful sentence, or simple proposition",
                 "main_idea": "string",
                 "visual_style": "string",
                 "palette": ["#hex", "#hex", "#hex"],
@@ -150,97 +156,70 @@ def build_art_recipe_with_model(
         )
         return personalized_fallback
 
-    if response.error:
-        personalized_fallback = _personalize_recipe(fallback, profile, fallback)
-        log_event(
-            "llm_art_recipe",
-            {
-                "source": response.source,
-                "elapsed_seconds": elapsed_seconds,
-                "error": response.error,
-                "transport_error": response.error,
-                "raw_content": response.content,
-                "used_fallback": True,
-                "retry_count": 0,
-                "thinking_enabled": LLAMACPP_RECIPE_THINKING,
-                "recipe": personalized_fallback.model_dump(),
-            },
-        )
-        return personalized_fallback
-
-    try:
-        recipe = ArtRecipe.model_validate(_normalize_recipe_payload(extract_json_object(response.content), profile))
-        recipe = _personalize_recipe(recipe, profile, fallback)
-    except Exception as exc:
-        repair_response = llm.complete_json(
-            _repair_recipe_prompt(),
-            {
-                "invalid_json": response.content,
-                "fallback_recipe": fallback.model_dump(),
-            },
-            max_tokens=_recipe_token_budget(),
-            response_format={"type": "json_object"},
-            thinking=LLAMACPP_RECIPE_THINKING,
-        )
+    current_response = response
+    last_error = response.error or ""
+    max_attempts = 4
+    for attempt in range(max_attempts):
         try:
-            recipe = ArtRecipe.model_validate(_normalize_recipe_payload(extract_json_object(repair_response.content), profile))
+            if current_response.error:
+                raise ValueError(current_response.error)
+            recipe = ArtRecipe.model_validate(_normalize_recipe_payload(extract_json_object(current_response.content), profile))
             recipe = _personalize_recipe(recipe, profile, fallback)
-        except Exception as repair_exc:
-            error_text = f"{exc}; repair failed: {repair_exc}"
-            if repair_response.error:
-                error_text += f"; repair transport: {repair_response.error}"
-            log_event(
-                "llm_art_recipe",
+        except Exception as exc:
+            last_error = str(exc)
+            if attempt >= max_attempts - 1:
+                personalized_fallback = _personalize_recipe(fallback, profile, fallback)
+                log_event(
+                    "llm_art_recipe",
+                    {
+                        "source": current_response.source or response.source,
+                        "elapsed_seconds": round(time.perf_counter() - started, 3),
+                        "error": last_error,
+                        "transport_error": current_response.error,
+                        "raw_content": current_response.content or response.content,
+                        "used_fallback": True,
+                        "retry_count": attempt,
+                        "thinking_enabled": LLAMACPP_RECIPE_THINKING,
+                        "recipe": personalized_fallback.model_dump(),
+                    },
+                )
+                return personalized_fallback
+            current_response = llm.complete_json(
+                _repair_recipe_prompt(),
                 {
-                    "source": repair_response.source or response.source,
-                    "elapsed_seconds": round(time.perf_counter() - started, 3),
-                    "error": error_text,
-                    "transport_error": repair_response.error,
-                    "raw_content": repair_response.content or response.content,
-                    "used_fallback": True,
-                    "retry_count": 1,
-                    "thinking_enabled": LLAMACPP_RECIPE_THINKING,
-                    "recipe": _personalize_recipe(fallback, profile, fallback).model_dump(),
+                    "invalid_json": current_response.content,
+                    "previous_error": last_error,
+                    "attempt": attempt + 1,
+                    "fallback_recipe": fallback.model_dump(),
                 },
+                max_tokens=_recipe_token_budget(),
+                response_format={"type": "json_object"},
+                thinking=LLAMACPP_RECIPE_THINKING,
             )
-            return _personalize_recipe(fallback, profile, fallback)
+            continue
 
         log_event(
             "llm_art_recipe",
             {
-                "source": repair_response.source,
+                "source": current_response.source,
                 "elapsed_seconds": round(time.perf_counter() - started, 3),
-                "error": str(exc),
-                "transport_error": repair_response.error,
-                "raw_content": repair_response.content,
+                "error": last_error if attempt else None,
+                "transport_error": current_response.error,
+                "raw_content": current_response.content,
                 "used_fallback": False,
-                "retry_count": 1,
+                "retry_count": attempt,
                 "thinking_enabled": LLAMACPP_RECIPE_THINKING,
                 "recipe": recipe.model_dump(),
             },
         )
         return recipe
-
-    log_event(
-        "llm_art_recipe",
-        {
-            "source": response.source,
-            "elapsed_seconds": elapsed_seconds,
-            "transport_error": response.error,
-            "raw_content": response.content,
-            "used_fallback": False,
-            "retry_count": 0,
-            "thinking_enabled": LLAMACPP_RECIPE_THINKING,
-            "recipe": recipe.model_dump(),
-        },
-    )
-    return recipe
+    return _personalize_recipe(fallback, profile, fallback)
 
 
 def _repair_recipe_prompt() -> str:
     return (
         "Return valid JSON only for an ArtRecipe. "
-        "Required keys: title, main_idea, visual_style, palette, symbols, composition, "
+        "Required keys: title, central_phrase, main_idea, visual_style, palette, symbols, composition, "
         "image_prompt, negative_prompt, friend_explanation. "
         "symbols must be objects with visual and meaning. "
         "Make the explanation plain, personal, and connected to the user's theme."
@@ -248,8 +227,16 @@ def _repair_recipe_prompt() -> str:
 
 
 def _recipe_token_budget() -> int:
-    floor = 560 if LLAMACPP_RECIPE_THINKING else 380
+    floor = 1200 if LLAMACPP_RECIPE_THINKING else 800
     return max(LLM_RECIPE_MAX_TOKENS, floor)
+
+
+def _central_phrase_from_profile(profile: InterviewProfile, idea: str) -> str:
+    notes = [item for item in profile.free_notes + profile.contrasts + profile.ideas if item and item != idea]
+    if notes:
+        detail = notes[-1].rstrip(".")
+        return f"{_clean_idea_for_explanation(idea).capitalize()} becomes real through {detail.lower()}."
+    return f"{_clean_idea_for_explanation(idea).capitalize()} can become visible without being literal."
 
 
 def _normalize_recipe_payload(payload: dict, profile: InterviewProfile) -> dict:
@@ -257,6 +244,7 @@ def _normalize_recipe_payload(payload: dict, profile: InterviewProfile) -> dict:
         return payload
     fallback = build_art_recipe(profile)
     payload["title"] = str(payload.get("title", "")).strip() or fallback.title
+    payload["central_phrase"] = str(payload.get("central_phrase", "")).strip() or _central_phrase_from_profile(profile, payload.get("main_idea") or fallback.main_idea)
     payload["main_idea"] = str(payload.get("main_idea", "")).strip() or fallback.main_idea
     payload["visual_style"] = str(payload.get("visual_style", "")).strip() or fallback.visual_style
     payload["composition"] = str(payload.get("composition", "")).strip() or fallback.composition
@@ -277,7 +265,7 @@ def _normalize_recipe_payload(payload: dict, profile: InterviewProfile) -> dict:
             break
         if all(existing["visual"].lower() != symbol.visual.lower() for existing in normalized_symbols):
             normalized_symbols.append(symbol.model_dump())
-    payload["symbols"] = normalized_symbols[:6]
+    payload["symbols"] = normalized_symbols[:12]
     payload["image_prompt"] = str(payload.get("image_prompt", "")).strip() or _image_prompt_from_partial(payload, fallback)
     if not payload.get("negative_prompt"):
         payload["negative_prompt"] = "text, letters, words, signature, watermark, literal portrait, photorealistic scene"
@@ -307,6 +295,7 @@ def _image_prompt_from_partial(payload: dict, fallback: ArtRecipe) -> str:
 
 def _personalize_recipe(recipe: ArtRecipe, profile: InterviewProfile, fallback: ArtRecipe) -> ArtRecipe:
     recipe.title = recipe.title.strip() or fallback.title
+    recipe.central_phrase = recipe.central_phrase.strip() or _central_phrase_from_profile(profile, recipe.main_idea or fallback.main_idea)
     recipe.main_idea = recipe.main_idea.strip() or _first(profile.ideas + profile.free_notes, fallback.main_idea)
     recipe.visual_style = recipe.visual_style.strip() or fallback.visual_style
     recipe.composition = recipe.composition.strip() or fallback.composition

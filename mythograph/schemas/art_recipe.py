@@ -8,10 +8,11 @@ class Symbol(BaseModel):
 
 class ArtRecipe(BaseModel):
     title: str
+    central_phrase: str = ""
     main_idea: str
     visual_style: str
     palette: list[str] = Field(min_length=3, max_length=6)
-    symbols: list[Symbol] = Field(min_length=3, max_length=6)
+    symbols: list[Symbol] = Field(min_length=3)
     composition: str
     image_prompt: str
     negative_prompt: str

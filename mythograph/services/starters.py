@@ -47,63 +47,60 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
     if response.source == "mock":
         return fallback_starters(count)
 
-    try:
-        starters = _normalize_starters(extract_json_object(response.content), count)
-    except Exception as exc:
-        repair_response = llm.complete_json(
-            _repair_starters_prompt(),
-            {
-                "invalid_json": response.content,
-                "previous_error": str(exc),
-                "required_shape": {"starters": [{"title": "string", "text": "string"}]},
-                "fallback_examples": [starter.model_dump() for starter in fallback_starters(count)],
-            },
-            max_tokens=max(LLM_CHAT_MAX_TOKENS, 220),
-            response_format={"type": "json_object"},
-        )
+    current_response = response
+    last_error = response.error or ""
+    max_attempts = 4
+    for attempt in range(max_attempts):
         try:
-            starters = _normalize_starters(extract_json_object(repair_response.content), count)
-            log_event(
-                "llm_conversation_starters",
+            if current_response.error:
+                raise ValueError(current_response.error)
+            starters = _normalize_starters(extract_json_object(current_response.content), count)
+        except Exception as exc:
+            last_error = str(exc)
+            if attempt >= max_attempts - 1:
+                starters = fallback_starters(count)
+                log_event(
+                    "llm_conversation_starters",
+                    {
+                        "source": current_response.source or response.source,
+                        "elapsed_seconds": round(time.perf_counter() - started, 3),
+                        "error": last_error,
+                        "transport_error": current_response.error,
+                        "used_fallback": True,
+                        "retry_count": attempt,
+                        "raw_content": current_response.content or response.content,
+                        "starters": [starter.model_dump() for starter in starters],
+                    },
+                )
+                return starters
+            current_response = llm.complete_json(
+                _repair_starters_prompt(),
                 {
-                    "source": repair_response.source,
-                    "elapsed_seconds": round(time.perf_counter() - started, 3),
-                    "used_fallback": False,
-                    "retry_count": 1,
-                    "raw_content": repair_response.content,
-                    "starters": [starter.model_dump() for starter in starters],
+                    "invalid_json": current_response.content,
+                    "previous_error": last_error,
+                    "attempt": attempt + 1,
+                    "required_shape": {"starters": [{"title": "string", "text": "string"}]},
+                    "fallback_examples": [starter.model_dump() for starter in fallback_starters(count)],
                 },
+                max_tokens=max(LLM_CHAT_MAX_TOKENS, 220),
+                response_format={"type": "json_object"},
             )
-            return starters
-        except Exception as repair_exc:
-            starters = fallback_starters(count)
-            log_event(
-                "llm_conversation_starters",
-                {
-                    "source": repair_response.source or response.source,
-                    "elapsed_seconds": round(time.perf_counter() - started, 3),
-                    "error": f"{exc}; repair failed: {repair_exc}",
-                    "transport_error": repair_response.error,
-                    "used_fallback": True,
-                    "raw_content": repair_response.content or response.content,
-                    "starters": [starter.model_dump() for starter in starters],
-                },
-            )
-            return starters
+            continue
 
-    log_event(
-        "llm_conversation_starters",
-        {
-            "source": response.source,
-            "elapsed_seconds": round(time.perf_counter() - started, 3),
-            "transport_error": response.error,
-            "used_fallback": bool(response.error),
-            "retry_count": 0,
-            "raw_content": response.content,
-            "starters": [starter.model_dump() for starter in starters],
-        },
-    )
-    return starters
+        log_event(
+            "llm_conversation_starters",
+            {
+                "source": current_response.source,
+                "elapsed_seconds": round(time.perf_counter() - started, 3),
+                "transport_error": current_response.error,
+                "used_fallback": False,
+                "retry_count": attempt,
+                "raw_content": current_response.content,
+                "starters": [starter.model_dump() for starter in starters],
+            },
+        )
+        return starters
+    return fallback_starters(count)
 
 
 def _repair_starters_prompt() -> str:

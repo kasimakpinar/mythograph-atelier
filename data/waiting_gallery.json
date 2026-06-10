@@ -1,0 +1,22 @@
+[
+  {
+    "title": "When Spring Starts Feeling Real",
+    "phrase": "Spring is not only longer daylight; it is the body remembering that life can open again.",
+    "image": "data/gallery/spring.png"
+  },
+  {
+    "title": "One More Morning",
+    "phrase": "Trying again can be small: a cup, a breath, the first ordinary action of the day.",
+    "image": "data/gallery/morning.png"
+  },
+  {
+    "title": "Two Places at Once",
+    "phrase": "Missing home and becoming independent can live in the same person.",
+    "image": "data/gallery/home.png"
+  },
+  {
+    "title": "Space in My Head Again",
+    "phrase": "A reset does not erase the hard week; it moves the mess away from the center.",
+    "image": "data/gallery/reset.png"
+  }
+]

@@ -174,6 +174,79 @@ button.ma-chip {
   font-size: 0.92rem;
 }
 
+.ma-waiting-gallery {
+  border: 1px solid rgba(22, 21, 19, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 250, 241, 0.8);
+  box-shadow: var(--ma-shadow);
+  padding: 16px;
+  margin: 10px 0 16px;
+}
+
+.ma-waiting-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.ma-waiting-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--ma-soft-ink);
+}
+
+.ma-waiting-track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(210px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.ma-waiting-card {
+  min-height: 220px;
+  border: 1px solid rgba(22, 21, 19, 0.12);
+  border-radius: 8px;
+  background: var(--ma-paper-2);
+  overflow: hidden;
+}
+
+.ma-waiting-card img,
+.ma-waiting-placeholder {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+}
+
+.ma-waiting-placeholder {
+  background:
+    linear-gradient(135deg, rgba(184, 135, 47, 0.28), transparent 42%),
+    linear-gradient(45deg, rgba(63, 111, 112, 0.24), rgba(56, 95, 130, 0.18)),
+    var(--ma-paper);
+}
+
+.ma-waiting-copy {
+  padding: 12px;
+}
+
+.ma-waiting-copy strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ma-ink);
+}
+
+.ma-waiting-copy p {
+  margin: 0;
+  color: var(--ma-muted);
+  line-height: 1.42;
+  font-size: 0.9rem;
+}
+
 #ma-control-tray {
   border: 1px solid rgba(22, 21, 19, 0.12);
   border-radius: 8px;
@@ -274,17 +347,17 @@ button.ma-ghost {
   letter-spacing: 0;
 }
 
-.ma-symbol-table table {
-  width: 100%;
-  border-collapse: collapse;
+.ma-symbol-table h3 {
+  margin: 22px 0 10px;
 }
 
-.ma-symbol-table th,
-.ma-symbol-table td {
-  border-bottom: 1px solid var(--ma-line);
-  padding: 10px 6px;
-  text-align: left;
-  vertical-align: top;
+.ma-symbol-table ul {
+  padding-left: 1.1rem;
+}
+
+.ma-symbol-table li {
+  margin-bottom: 10px;
+  line-height: 1.45;
 }
 
 .gradio-container .form,
@@ -305,6 +378,14 @@ button.ma-ghost {
   .ma-card-control .wrap,
   .ma-swatch-control .wrap {
     grid-template-columns: 1fr;
+  }
+
+  .ma-waiting-head {
+    display: block;
+  }
+
+  .ma-waiting-track {
+    grid-auto-columns: minmax(190px, 82vw);
   }
 
   #ma-input-dock {

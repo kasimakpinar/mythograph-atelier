@@ -11,6 +11,7 @@ from mythograph.services.conversation import advance_conversation, model_error_t
 from mythograph.services.starters import fallback_starters, generate_conversation_starters
 from mythograph.services.trace_logger import export_trace, log_event
 from mythograph.ui.examples import REGENERATION_OPTIONS
+from mythograph.ui.waiting_gallery import render_waiting_gallery
 
 
 STARTER_CHIPS = fallback_starters(6)
@@ -84,6 +85,7 @@ def build_demo() -> gr.Blocks:
                 bubble_full_width=False,
             )
             progress = gr.Markdown(initial_turn.progress_label, elem_classes=["ma-progress"])
+            waiting_gallery = gr.HTML("", visible=False, elem_classes=["ma-waiting-shell"], container=False)
 
             with gr.Group(elem_id="ma-control-tray"):
                 with gr.Group(visible=False, elem_classes=["ma-control-group"]) as choice_group:
@@ -170,6 +172,7 @@ def build_demo() -> gr.Blocks:
             chatbot,
             chat_text,
             progress,
+            waiting_gallery,
             choice_group,
             choice_cards,
             multi_group,
@@ -241,6 +244,13 @@ def build_demo() -> gr.Blocks:
             outputs=[starter_state, *starter_buttons],
         )
 
+        demo.load(
+            fn=_refresh_starters,
+            inputs=[starter_state],
+            outputs=[starter_state, *starter_buttons],
+            show_progress="hidden",
+        )
+
         choice_submit.click(
             fn=_submit_choice,
             inputs=[profile_state, chat_history_state, turn_state, choice_cards],
@@ -283,8 +293,18 @@ def build_demo() -> gr.Blocks:
         )
         trace_button.click(fn=_export_trace, outputs=trace_file)
 
-        reset_button.click(fn=_reset, outputs=flow_outputs)
-        reset_from_start.click(fn=_reset, outputs=flow_outputs)
+        reset_button.click(fn=_reset, outputs=flow_outputs).then(
+            fn=_refresh_starters,
+            inputs=[starter_state],
+            outputs=[starter_state, *starter_buttons],
+            show_progress="hidden",
+        )
+        reset_from_start.click(fn=_reset, outputs=flow_outputs).then(
+            fn=_refresh_starters,
+            inputs=[starter_state],
+            outputs=[starter_state, *starter_buttons],
+            show_progress="hidden",
+        )
 
     return demo
 
@@ -475,8 +495,10 @@ def _thinking_render(profile: InterviewProfile, history: list[dict], progress_la
             "Loading GPU text model...\n"
             "The first reply can take longer while llama.cpp loads the GGUF. Later replies should be faster."
         )
+        waiting_html = render_waiting_gallery("The model is loading now. Meanwhile, you can take a look at the gallery.")
     else:
         activity = "GPU text model thinking...\nNemotron is choosing the next question and control."
+        waiting_html = ""
     return _render(
         profile,
         history,
@@ -487,6 +509,7 @@ def _thinking_render(profile: InterviewProfile, history: list[dict], progress_la
             is_ready=False,
         ),
         activity=activity,
+        waiting_html=waiting_html,
     )
 
 
@@ -536,6 +559,7 @@ def _render(
     image_path: str | None = None,
     recipe=None,
     show_gallery: bool = False,
+    waiting_html: str = "",
 ):
     control = turn.controls[0] if turn.controls else None
     kind = control.kind if control else None
@@ -548,13 +572,15 @@ def _render(
     regen_button = gr.update(visible=False)
     trace_button = gr.update(visible=bool(history) or bool(activity))
     model_activity = gr.update(value=activity, visible=bool(activity))
+    waiting_gallery = gr.update(value=waiting_html, visible=bool(waiting_html))
     chat_placeholder = "Answer in your own words, or add a thought, correction, quote, or memory..."
     if kind == ControlKind.TEXT_REFINEMENT and control and control.prompt:
         chat_placeholder = control.prompt
     if recipe:
-        label = f"## {recipe.title}\n\n{recipe.friend_explanation}"
-        symbol_rows = "\n".join(f"| {symbol.visual} | {symbol.meaning} |" for symbol in recipe.symbols)
-        symbols = f"| Visual element | Meaning |\n|---|---|\n{symbol_rows}"
+        central_phrase = getattr(recipe, "central_phrase", "").strip()
+        phrase_block = f"\n\n> {central_phrase}\n" if central_phrase else ""
+        label = f"## {recipe.title}{phrase_block}\n\n{recipe.friend_explanation}"
+        symbols = _meaning_links(recipe)
         prompt = gr.update(value=recipe.image_prompt, visible=True)
         regen = gr.update(visible=True)
         regen_button = gr.update(visible=True)
@@ -569,6 +595,7 @@ def _render(
         history,
         gr.update(value="", placeholder=chat_placeholder),
         f"**{turn.progress_label}**",
+        waiting_gallery,
         gr.update(visible=kind == ControlKind.CHOICE_CARDS),
         gr.update(choices=options, value=None),
         gr.update(visible=kind == ControlKind.MULTI_CHOICE_CARDS),
@@ -623,6 +650,15 @@ def _slider_label_at(turn: ConversationTurn, index: int, default: str) -> str:
     return label
 
 
+def _meaning_links(recipe) -> str:
+    if not getattr(recipe, "symbols", None):
+        return ""
+    lines = ["### Meaning links"]
+    for symbol in recipe.symbols:
+        lines.append(f"- **{symbol.meaning}** becomes **{symbol.visual}**.")
+    return "\n".join(lines)
+
+
 @spaces.GPU(duration=120)
 def _prepare_generation(profile_data: dict, history: list[dict], recipe_data: dict | None):
     profile = _profile(profile_data)
@@ -633,8 +669,16 @@ def _prepare_generation(profile_data: dict, history: list[dict], recipe_data: di
         reason="generation started",
         is_ready=False,
     )
+    yield _render(
+        profile,
+        working_history,
+        turn,
+        recipe_data,
+        "GPU text recipe is being prepared.",
+        waiting_html=render_waiting_gallery("The art recipe is being written now. Meanwhile, you can take a look at the gallery."),
+    )
     recipe = build_art_recipe_with_model(profile)
-    return _render(
+    yield _render(
         profile,
         working_history,
         turn,
@@ -656,8 +700,16 @@ def _prepare_regeneration(profile_data: dict, history: list[dict], recipe_data: 
         reason="regeneration started",
         is_ready=False,
     )
+    yield _render(
+        profile,
+        working_history,
+        turn,
+        recipe_data,
+        "GPU text recipe revision is being prepared.",
+        waiting_html=render_waiting_gallery("The recipe is being revised now. Meanwhile, you can take a look at the gallery."),
+    )
     recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
-    return _render(
+    yield _render(
         profile,
         working_history,
         turn,
@@ -678,17 +730,32 @@ def _render_prepared_image(
 ):
     profile = _profile(profile_data)
     if not recipe_data:
-        return _render(
+        yield _render(
             profile,
             history or [],
             start_session(),
             recipe_data,
             "No recipe was prepared; please continue the conversation and try again.",
         )
+        return
     from mythograph.schemas.art_recipe import ArtRecipe
 
     LlamaCppClient.unload()
     recipe = ArtRecipe.model_validate(recipe_data)
+    yield _render(
+        profile,
+        history or [],
+        ConversationTurn(
+            assistant_message="I am rendering the image now.",
+            progress_label="Painting: FLUX is rendering",
+            reason="image generation in progress",
+            is_ready=False,
+        ),
+        recipe.model_dump(),
+        "FLUX image generation is running.",
+        recipe=recipe,
+        waiting_html=render_waiting_gallery("The image is being generated now. Meanwhile, you can take a look at the gallery."),
+    )
     image_result = ImageClient().generate(recipe)
     log_event(
         "image_generation",
@@ -702,7 +769,7 @@ def _render_prepared_image(
     event_name = "regenerate" if action == "regenerate" else "generate"
     log_event(event_name, {"profile": profile.model_dump(), "recipe": recipe.model_dump(), "image_path": image_result.path})
     final_history = (history or []) + [_message("assistant", f"Done. The piece is called **{recipe.title}**.")]
-    return _render(
+    yield _render(
         profile,
         final_history,
         ConversationTurn(
@@ -735,6 +802,7 @@ def _reset():
         [],
         gr.update(value=""),
         f"**{turn.progress_label}**",
+        gr.update(value="", visible=False),
         gr.update(visible=False),
         gr.update(choices=[], value=None),
         gr.update(visible=False),
