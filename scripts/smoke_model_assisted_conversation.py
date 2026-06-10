@@ -265,6 +265,21 @@ def main() -> None:
         bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
         assert bad.controls == []
         assert bad.progress_label == "Understanding your theme"
+
+        stance_profile = conversation.new_profile()
+        stance_profile.ideas.append("I want something about the calmness in the chaos")
+        stance_profile = conversation.update_scores(stance_profile)
+        conversation.apply_control_response(
+            stance_profile,
+            conversation.ControlResponse(
+                kind=ControlKind.CHOICE_CARDS,
+                values=["It should feel accepting, like the system is fair and the chaos is part of it."],
+                label="What stance should it take toward this idea?",
+                prompt="Pick the reading that fits best.",
+            ),
+        )
+        assert stance_profile.contrasts
+        assert not stance_profile.styles
     finally:
         conversation.CONVERSATION_MODE = original_mode
 

@@ -147,10 +147,7 @@ def choose_conversation_turn_with_model(
             last_content = current_response.content or last_content
             if attempt >= max_attempts - 1:
                 elapsed_seconds = round(time.perf_counter() - started, 3)
-                error_turn = model_error_turn(
-                    "I want to keep this simple. Tell me a little more about what this theme means to you in real life.",
-                    last_error,
-                )
+                error_turn = safe_conversation_fallback(profile, last_error)
                 log_event(
                     "llm_conversation_turn",
                     {
@@ -206,16 +203,41 @@ def choose_conversation_turn_with_model(
         )
         return candidate
 
-    return model_error_turn(
-        "I want to keep this simple. Tell me a little more about what this theme means to you in real life.",
-        last_error,
-    )
+    return safe_conversation_fallback(profile, last_error)
 
 
 def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
     reason = "llama.cpp did not return valid schema JSON"
     if detail:
         reason = f"{reason}: {detail[:900]}"
+    return ConversationTurn(
+        assistant_message=message,
+        progress_label="Understanding your theme",
+        reason=reason,
+        is_ready=False,
+        controls=[],
+    )
+
+
+def safe_conversation_fallback(profile: InterviewProfile, detail: str = "") -> ConversationTurn:
+    idea = _first_nonempty(profile.ideas + profile.free_notes)
+    if profile.turn_count <= 2:
+        message = (
+            "That helps. Give me one concrete place where this shows up in real life: "
+            "work, relationships, money, time, ambition, family, or something else."
+        )
+    elif not profile.contrasts:
+        message = (
+            "I think I understand the theme better now. What attitude should the painting hold toward it: "
+            "acceptance, resistance, trust, doubt, tenderness, or something else in your own words?"
+        )
+    else:
+        message = "I think I have enough of the meaning now. Add one last correction if I missed the heart of it."
+    if not idea:
+        message = "Tell me what this should be about in ordinary words. One sentence is enough."
+    reason = "Fallback after invalid model output."
+    if detail:
+        reason = f"{reason} {detail[:600]}"
     return ConversationTurn(
         assistant_message=message,
         progress_label="Understanding your theme",
@@ -646,6 +668,7 @@ def sanitize_conversation_turn(
         if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS} and len(control.options) < 3:
             raise ValueError(f"{control.kind.value} must provide at least three options before sanitization")
         control.options = _sanitize_options(control.options, _recent_choices(profile), profile)
+        control.prompt = _sanitize_control_prompt(control.prompt, control.kind)
     elif control.kind == ControlKind.SLIDER_GROUP:
         control.sliders = _sanitize_sliders(control.sliders)
     elif control.kind == ControlKind.TEXT_REFINEMENT:
@@ -755,8 +778,28 @@ def _clean_option_text(value: str) -> str:
     clean = " ".join(value.replace("...", " ").split())
     if not clean:
         return ""
-    if len(clean) > 82:
-        clean = clean[:79].rstrip(" ,.;:") + "."
+    if len(clean) > 120:
+        boundary = clean.rfind(" ", 0, 118)
+        cut_at = boundary if boundary >= 70 else 117
+        clean = clean[:cut_at].rstrip(" ,.;:") + "."
+    return clean
+
+
+def _sanitize_control_prompt(prompt: str, kind: ControlKind) -> str:
+    clean = " ".join((prompt or "").strip().split())
+    if kind == ControlKind.CHOICE_CARDS:
+        replacements = {
+            "or choose a few if none fit perfectly": "or keep typing if none fit perfectly",
+            "or pick a few if none fit perfectly": "or keep typing if none fit perfectly",
+            "pick any that feel true": "pick the closest one, or keep typing",
+            "choose any that feel true": "choose the closest one, or keep typing",
+        }
+        lowered = clean.lower()
+        for old, new in replacements.items():
+            if old in lowered:
+                start = lowered.find(old)
+                clean = clean[:start] + new + clean[start + len(old) :]
+                lowered = clean.lower()
     return clean
 
 
@@ -972,6 +1015,8 @@ def _apply_choice(profile: InterviewProfile, value: str, response: ControlRespon
         profile.symbols.append(value)
     elif value in CONTRAST_OPTIONS:
         profile.contrasts.append(value)
+    elif _looks_like_model_interpretive_choice(response):
+        profile.contrasts.append(value)
     elif value in PALETTE_OPTIONS:
         profile.visual_preferences["palette_mood"] = value
     elif _looks_like_model_style_choice(profile, response):
@@ -988,9 +1033,30 @@ def _looks_like_model_style_choice(profile: InterviewProfile, response: ControlR
     if response is None or profile.styles:
         return False
     label = _response_context(response)
+    if _looks_like_model_interpretive_choice(response):
+        return False
     return profile.scores.idea_anchor >= 0.65 and (
         profile.scores.visual_taste < 0.45
         or any(word in label for word in ["style", "presence", "mood", "feel", "tone", "texture", "weather"])
+    )
+
+
+def _looks_like_model_interpretive_choice(response: ControlResponse | None) -> bool:
+    if response is None:
+        return False
+    label = _response_context(response)
+    return any(
+        word in label
+        for word in [
+            "stance",
+            "interpretation",
+            "reading",
+            "meaning",
+            "attitude",
+            "belief",
+            "value",
+            "admission",
+        ]
     )
 
 
