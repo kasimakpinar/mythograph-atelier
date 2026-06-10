@@ -288,7 +288,8 @@ def _format_runtime_status() -> str:
             f'{status["llamacpp_repo_id"]} / {status["llamacpp_filename"]} '
             f'(CPU threads: {status["llamacpp_n_threads"]}, preload: {status["llamacpp_preload"]}, '
             f'GPU layers: {status["llamacpp_n_gpu_layers"]}, chat: {status["llamacpp_chat_enabled"]}, '
-            f'recipe: {status["llamacpp_recipe_enabled"]}, unload: {status["llamacpp_unload_after_call"]})'
+            f'recipe: {status["llamacpp_recipe_enabled"]}, thinking: {status["llamacpp_recipe_thinking"]}, '
+            f'unload: {status["llamacpp_unload_after_call"]})'
         )
     elif mode == "local":
         model = f'{status["openai_compatible_model"]} at {status["openai_compatible_base_url"]}'

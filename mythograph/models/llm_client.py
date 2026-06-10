@@ -21,6 +21,7 @@ from mythograph.config import (
     LLAMACPP_N_THREADS,
     LLAMACPP_PRELOAD,
     LLAMACPP_RECIPE_ENABLED,
+    LLAMACPP_RECIPE_THINKING,
     LLAMACPP_REPO_ID,
     LLAMACPP_UNLOAD_AFTER_CALL,
     LLAMACPP_VERBOSE,
@@ -67,6 +68,7 @@ class LLMClient:
         max_tokens: int | None = None,
         temperature: float | None = None,
         response_format: dict[str, str] | None = None,
+        thinking: bool = False,
     ) -> LLMResponse:
         if self.mode == "mock":
             return LLMResponse(content="", source="mock")
@@ -77,6 +79,7 @@ class LLMClient:
                 max_tokens=max_tokens or self.max_tokens,
                 temperature=temperature if temperature is not None else self.temperature,
                 response_format=response_format,
+                thinking=thinking,
             )
 
         started = time.perf_counter()
@@ -128,6 +131,7 @@ class LlamaCppClient:
         max_tokens: int = LLM_CHAT_MAX_TOKENS,
         temperature: float = LLM_TEMPERATURE,
         response_format: dict[str, str] | None = None,
+        thinking: bool = False,
     ) -> LLMResponse:
         started = time.perf_counter()
         try:
@@ -142,6 +146,7 @@ class LlamaCppClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 response_format=response_format,
+                thinking=thinking,
                 started=started,
             )
         except Exception as exc:
@@ -162,6 +167,7 @@ class LlamaCppClient:
         max_tokens: int = LLM_CHAT_MAX_TOKENS,
         temperature: float = LLM_TEMPERATURE,
         response_format: dict[str, str] | None = None,
+        thinking: bool = False,
     ) -> LLMResponse:
         started = time.perf_counter()
         try:
@@ -172,6 +178,7 @@ class LlamaCppClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 response_format=response_format,
+                thinking=thinking,
                 started=started,
             )
         except Exception as exc:
@@ -192,6 +199,7 @@ class LlamaCppClient:
         max_tokens: int,
         temperature: float,
         response_format: dict[str, str] | None,
+        thinking: bool,
         started: float,
     ) -> LLMResponse:
         errors: list[str] = []
@@ -202,8 +210,25 @@ class LlamaCppClient:
         }
         if response_format:
             chat_kwargs["response_format"] = response_format
+        if thinking:
+            chat_kwargs["chat_template_kwargs"] = {"enable_thinking": True}
 
-        for kwargs in (chat_kwargs, {key: value for key, value in chat_kwargs.items() if key != "response_format"}):
+        fallback_kwargs = [
+            chat_kwargs,
+            {key: value for key, value in chat_kwargs.items() if key != "response_format"},
+            {key: value for key, value in chat_kwargs.items() if key != "chat_template_kwargs"},
+            {
+                key: value
+                for key, value in chat_kwargs.items()
+                if key not in {"response_format", "chat_template_kwargs"}
+            },
+        ]
+        seen: set[tuple[str, ...]] = set()
+        for kwargs in fallback_kwargs:
+            signature = tuple(sorted(kwargs))
+            if signature in seen:
+                continue
+            seen.add(signature)
             try:
                 raw = llm.create_chat_completion(**kwargs)
                 content = raw["choices"][0]["message"]["content"]
@@ -304,6 +329,7 @@ def runtime_status() -> dict[str, Any]:
                 "llamacpp_preload": LLAMACPP_PRELOAD,
                 "llamacpp_chat_enabled": LLAMACPP_CHAT_ENABLED,
                 "llamacpp_recipe_enabled": LLAMACPP_RECIPE_ENABLED,
+                "llamacpp_recipe_thinking": LLAMACPP_RECIPE_THINKING,
                 "llamacpp_unload_after_call": LLAMACPP_UNLOAD_AFTER_CALL,
                 "llamacpp_flash_attn": LLAMACPP_FLASH_ATTN,
             }

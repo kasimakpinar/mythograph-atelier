@@ -5,13 +5,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mythograph.models.llm_client import LLMResponse
-from mythograph.config import LLM_RECIPE_MAX_TOKENS
-from mythograph.services.art_recipe import build_art_recipe_with_model
+from mythograph.services.art_recipe import _recipe_token_budget, build_art_recipe_with_model
 from mythograph.services.interview import choose_next_ui_with_model, new_profile
 
 
 class FakeClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
         if "Choose the next UI action" in system_prompt:
             return LLMResponse(
                 content=json.dumps(
@@ -25,8 +24,9 @@ class FakeClient:
                 ),
                 source="local",
             )
-        assert max_tokens == max(LLM_RECIPE_MAX_TOKENS, 340)
+        assert max_tokens == _recipe_token_budget()
         assert response_format == {"type": "json_object"}
+        assert thinking is True
         assert "fallback_recipe" not in user_payload
         assert "connection_principle" in user_payload
         return LLMResponse(
@@ -55,7 +55,8 @@ class FakeClient:
 
 
 class PartialRecipeClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
+        assert thinking is True
         return LLMResponse(
             content=json.dumps(
                 {

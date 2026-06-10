@@ -101,14 +101,17 @@ def choose_conversation_turn_with_model(
         "atelier_state": build_atelier_state(profile),
         "next_need": _next_need_for_model(profile, fallback_turn),
         "can_generate": can_generate,
-        "conversation_budget": "Aim for a useful artwork brief in 4-8 total user interactions. Continue only when the next answer will materially improve the painting.",
+        "conversation_budget": "Aim for a useful artwork brief in 3-5 meaningful exchanges. Keep chatting when the user's own words matter; use controls only when they help.",
+        "controls_are_optional": True,
         "allowed_control_kinds": _allowed_control_kinds(fallback_turn, can_generate),
         "control_guidance": {
-            "choice_cards": "3-5 fresh interpretations, emotional angles, stances, or meanings.",
-            "multi_choice_cards": "3-5 compatible tensions, values, memories, or readings; user may pick two.",
-            "slider_group": "2-3 conceptual dials, never visual dials.",
-            "text_refinement": "one free-text prompt when the topic needs the user's own words.",
-            "ready_button": "only when can_generate is true.",
+            "empty_controls": "Use plain chat when a real question is better than buttons.",
+            "choice_cards": "3-6 interpretations, emotional angles, stances, or readings.",
+            "multi_choice_cards": "3-6 compatible tensions, values, memories, or admissions; user may pick several.",
+            "slider_group": "2-3 conceptual dials such as honesty, control, distance, tenderness, acceptance, resistance.",
+            "swatch_picker": "rare mood climates, not literal color settings.",
+            "text_refinement": "invite a free reply in the main chat when the topic needs the user's own words.",
+            "ready_button": "when can_generate is true and the profile has enough personal signal.",
         },
     }
     response = llm.complete_json(
@@ -228,42 +231,34 @@ def _preview(text: str, limit: int = 900) -> str:
 
 def _repair_system_prompt() -> str:
     return (
-        "Return only valid JSON for Mythograph Atelier. No markdown. "
-        "Keep one control only. Use allowed kind names exactly. "
-        "Choose a useful semantic control from allowed_control_kinds. "
-        "Do not repeat previous questions or previous user answers as options. "
-        "Do not say 'one more ingredient', 'strong image', 'anchor the painting', or 'which detail makes this feeling yours'. "
-        "Ask a clear meaning-first question about the user's topic, memory, quote, value, contradiction, or belief. "
-        "Do not output styling, layout, CSS, HTML, Gradio code, or frontend instructions. "
-        "If unsure, use text_refinement with empty options and sliders, and make assistant_message end with a clear question."
+        "Return valid JSON only for a Mythograph Atelier ConversationTurn. "
+        "Use the schema fields assistant_message, progress_label, reason, is_ready, controls. "
+        "Controls may be empty. If a control is useful, include one control using an allowed kind name. "
+        "Ask about the user's theme, memory, quote, value, contradiction, or belief in plain language. "
+        "The control is semantic only; the custom frontend handles layout."
     )
 
 
 def _quality_rules_for_retry(profile: InterviewProfile) -> dict:
     return {
-        "avoid_phrases": _banned_turn_phrases(),
         "avoid_questions": profile.asked_questions[-8:],
         "avoid_options": profile.offered_options[-24:],
         "minimum_options_for_card_controls": 3,
-        "text_refinement_must_end_with_clear_question": True,
+        "controls_are_optional": True,
         "prefer_different_control_kind_than_recent": profile.control_history[-3:],
     }
 
 
 def _turn_quality_issue(candidate: ConversationTurn, profile: InterviewProfile) -> str:
+    message = _normalize_text(candidate.assistant_message)
+    if any(_texts_too_similar(message, _normalize_text(question)) for question in profile.asked_questions[-6:]):
+        return "assistant_message repeats a previous question"
+
     control = candidate.controls[0] if candidate.controls else None
     if not control or candidate.is_ready:
         return ""
 
-    message = _normalize_text(candidate.assistant_message)
     prompt = _normalize_text(control.prompt)
-    combined = f"{message} {prompt}"
-    for phrase in _banned_turn_phrases():
-        if phrase in combined:
-            return f"repeated or robotic phrase: {phrase}"
-
-    if any(_texts_too_similar(message, _normalize_text(question)) for question in profile.asked_questions[-6:]):
-        return "assistant_message repeats a previous question"
     if any(_texts_too_similar(prompt, _normalize_text(question)) for question in profile.asked_questions[-6:]):
         return "control prompt repeats a previous question"
 
@@ -281,25 +276,6 @@ def _turn_quality_issue(candidate: ConversationTurn, profile: InterviewProfile) 
         return f"control kind {control.kind.value} has repeated too often"
 
     return ""
-
-
-def _banned_turn_phrases() -> list[str]:
-    return [
-        "one more ingredient",
-        "personal ingredient",
-        "strong image",
-        "anchor the painting",
-        "anchor the calmness",
-        "anchor it",
-        "image can settle",
-        "before the image can settle",
-        "painting's skin",
-        "visual pressure",
-        "visual direction",
-        "which detail makes this feeling yours",
-        "what should anchor",
-        "what should it carry",
-    ]
 
 
 def _looks_like_question(message: str, prompt: str) -> bool:
@@ -489,13 +465,12 @@ def _slider_key(value: str) -> str:
 
 
 def _next_need_for_model(profile: InterviewProfile, turn: ConversationTurn) -> dict:
-    control = turn.controls[0] if turn.controls else None
     return {
         "target": _open_interview_target(profile, turn),
         "reason": _open_interview_reason(profile, turn),
-        "preferred_control_kind": control.kind.value if control else ControlKind.TEXT_REFINEMENT.value,
+        "preferred_control_kind": ControlKind.READY_BUTTON.value if _model_can_generate(profile) else None,
         "missing_signals": _missing_signals(profile),
-        "director_note": "This is a suggestion, not a stage. Choose the next move that feels most alive and useful.",
+        "director_note": "This is guidance, not a stage. A natural chat question is often better than a UI control.",
     }
 
 
@@ -556,6 +531,7 @@ def _allowed_control_kinds(fallback_turn: ConversationTurn, can_generate: bool =
         ControlKind.CHOICE_CARDS.value,
         ControlKind.MULTI_CHOICE_CARDS.value,
         ControlKind.SLIDER_GROUP.value,
+        ControlKind.SWATCH_PICKER.value,
     ]
     if can_generate:
         kinds.append(ControlKind.READY_BUTTON.value)
@@ -581,13 +557,26 @@ def sanitize_conversation_turn(
     profile: InterviewProfile,
     can_generate: bool | None = None,
 ) -> ConversationTurn:
-    if not candidate.controls:
-        raise ValueError("model response did not include a control")
-    candidate.controls = [candidate.controls[0]]
-    control = candidate.controls[0]
-
     if can_generate is None:
         can_generate = fallback_turn.is_ready
+
+    if not candidate.controls:
+        if candidate.is_ready and can_generate:
+            candidate.controls = [
+                DynamicControl(
+                    kind=ControlKind.READY_BUTTON,
+                    label="Create artwork",
+                    prompt="Generate the painting",
+                    options=["Create artwork"],
+                )
+            ]
+        else:
+            candidate.is_ready = False
+            candidate.assistant_message = _polish_assistant_message(candidate, profile)
+            return candidate
+
+    candidate.controls = [candidate.controls[0]]
+    control = candidate.controls[0]
 
     if control.kind != ControlKind.READY_BUTTON:
         candidate.is_ready = False
@@ -609,8 +598,6 @@ def sanitize_conversation_turn(
 
     if control.kind == ControlKind.READY_BUTTON and not can_generate:
         raise ValueError("model requested ready_button before profile was ready")
-    if control.kind == ControlKind.SWATCH_PICKER:
-        raise ValueError("swatch_picker is not allowed during the meaning-first interview")
 
     if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS, ControlKind.SWATCH_PICKER}:
         if control.kind in {ControlKind.CHOICE_CARDS, ControlKind.MULTI_CHOICE_CARDS} and len(control.options) < 3:
@@ -631,27 +618,10 @@ def sanitize_conversation_turn(
 
 
 def _ready_message(profile: InterviewProfile) -> str:
-    idea = _first_nonempty(profile.ideas + profile.free_notes)
-    fragment = _clean_idea_fragment(idea) if idea else "this feeling"
-    return f"I have enough to turn {fragment} into an abstract painting."
-
-
-def _clean_idea_fragment(text: str) -> str:
-    fragment = " ".join((text or "").strip().split())
-    lowered = fragment.lower()
-    prefixes = [
-        "i want something about ",
-        "i want something ",
-        "something about ",
-        "i want ",
-    ]
-    for prefix in prefixes:
-        if lowered.startswith(prefix):
-            fragment = fragment[len(prefix) :].strip()
-            break
-    if len(fragment) > 140:
-        fragment = fragment[:137].rstrip(" ,.;:") + "."
-    return fragment or "this feeling"
+    return (
+        "I have enough now. I will turn what you shared into a simple abstract painting recipe, "
+        "then render it as an image."
+    )
 
 
 def _polish_assistant_message(candidate: ConversationTurn, profile: InterviewProfile) -> str:

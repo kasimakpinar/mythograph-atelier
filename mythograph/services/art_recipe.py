@@ -2,7 +2,7 @@ import time
 
 from mythograph.schemas.art_recipe import ArtRecipe, Symbol
 from mythograph.schemas.profile import InterviewProfile
-from mythograph.config import LLAMACPP_RECIPE_ENABLED, LLM_RECIPE_MAX_TOKENS, ROOT_DIR
+from mythograph.config import LLAMACPP_RECIPE_ENABLED, LLAMACPP_RECIPE_THINKING, LLM_RECIPE_MAX_TOKENS, ROOT_DIR
 from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.services.trace_logger import log_event
 
@@ -128,8 +128,9 @@ def build_art_recipe_with_model(
                 "friend_explanation": "short personal explanation",
             },
         },
-        max_tokens=max(LLM_RECIPE_MAX_TOKENS, 340),
+        max_tokens=_recipe_token_budget(),
         response_format={"type": "json_object"},
+        thinking=LLAMACPP_RECIPE_THINKING,
     )
     elapsed_seconds = round(time.perf_counter() - started, 3)
 
@@ -141,6 +142,7 @@ def build_art_recipe_with_model(
                 "source": "mock",
                 "elapsed_seconds": elapsed_seconds,
                 "used_fallback": True,
+                "thinking_enabled": LLAMACPP_RECIPE_THINKING,
                 "recipe": personalized_fallback.model_dump(),
             },
         )
@@ -158,6 +160,7 @@ def build_art_recipe_with_model(
                 "raw_content": response.content,
                 "used_fallback": True,
                 "retry_count": 0,
+                "thinking_enabled": LLAMACPP_RECIPE_THINKING,
                 "recipe": personalized_fallback.model_dump(),
             },
         )
@@ -173,8 +176,9 @@ def build_art_recipe_with_model(
                 "invalid_json": response.content,
                 "fallback_recipe": fallback.model_dump(),
             },
-            max_tokens=max(LLM_RECIPE_MAX_TOKENS, 340),
+            max_tokens=_recipe_token_budget(),
             response_format={"type": "json_object"},
+            thinking=LLAMACPP_RECIPE_THINKING,
         )
         try:
             recipe = ArtRecipe.model_validate(_normalize_recipe_payload(extract_json_object(repair_response.content), profile))
@@ -193,6 +197,7 @@ def build_art_recipe_with_model(
                     "raw_content": repair_response.content or response.content,
                     "used_fallback": True,
                     "retry_count": 1,
+                    "thinking_enabled": LLAMACPP_RECIPE_THINKING,
                     "recipe": _personalize_recipe(fallback, profile, fallback).model_dump(),
                 },
             )
@@ -208,6 +213,7 @@ def build_art_recipe_with_model(
                 "raw_content": repair_response.content,
                 "used_fallback": False,
                 "retry_count": 1,
+                "thinking_enabled": LLAMACPP_RECIPE_THINKING,
                 "recipe": recipe.model_dump(),
             },
         )
@@ -222,6 +228,7 @@ def build_art_recipe_with_model(
             "raw_content": response.content,
             "used_fallback": False,
             "retry_count": 0,
+            "thinking_enabled": LLAMACPP_RECIPE_THINKING,
             "recipe": recipe.model_dump(),
         },
     )
@@ -230,13 +237,17 @@ def build_art_recipe_with_model(
 
 def _repair_recipe_prompt() -> str:
     return (
-        "Return only valid JSON for an ArtRecipe. No markdown. "
+        "Return valid JSON only for an ArtRecipe. "
         "Required keys: title, main_idea, visual_style, palette, symbols, composition, "
         "image_prompt, negative_prompt, friend_explanation. "
         "symbols must be objects with visual and meaning. "
-        "Do not use the phrase 'is not decoration'. "
-        "Make image_prompt non-representational abstract art, not a literal scene."
+        "Make the explanation plain, personal, and connected to the user's theme."
     )
+
+
+def _recipe_token_budget() -> int:
+    floor = 560 if LLAMACPP_RECIPE_THINKING else 380
+    return max(LLM_RECIPE_MAX_TOKENS, floor)
 
 
 def _normalize_recipe_payload(payload: dict, profile: InterviewProfile) -> dict:

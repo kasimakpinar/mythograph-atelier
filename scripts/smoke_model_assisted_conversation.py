@@ -10,9 +10,10 @@ import mythograph.services.conversation as conversation
 
 
 class GoodClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
         assert max_tokens == max(conversation.LLM_CHAT_MAX_TOKENS, 180)
         assert response_format == {"type": "json_object"}
+        assert thinking is False
         if "invalid_json" in user_payload:
             return LLMResponse(content=user_payload["invalid_json"], source="llamacpp")
         assert "atelier_state" in user_payload
@@ -25,8 +26,9 @@ class GoodClient:
         assert "suggested_component" not in user_payload["next_need"]
         assert "choice_cards" in user_payload["allowed_control_kinds"]
         assert "text_refinement" in user_payload["allowed_control_kinds"]
-        assert "swatch_picker" not in user_payload["allowed_control_kinds"]
+        assert "swatch_picker" in user_payload["allowed_control_kinds"]
         assert "ready_button" not in user_payload["allowed_control_kinds"]
+        assert user_payload["controls_are_optional"] is True
         assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
         return LLMResponse(
             content=json.dumps(
@@ -51,7 +53,7 @@ class GoodClient:
 
 
 class BadClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
         return LLMResponse(content="not json", source="llamacpp")
 
 
@@ -59,7 +61,7 @@ class RepairClient:
     def __init__(self):
         self.calls = 0
 
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
         self.calls += 1
         if self.calls == 1:
             return LLMResponse(content="not json", source="llamacpp")
@@ -86,7 +88,7 @@ class RepairClient:
 
 
 class FreeControlClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
         return LLMResponse(
             content=json.dumps(
                 {
@@ -110,7 +112,7 @@ class FreeControlClient:
 
 
 class LooseSliderClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
         return LLMResponse(
             content=json.dumps(
                 {
@@ -138,7 +140,7 @@ class RepetitiveThenGoodClient:
     def __init__(self):
         self.calls = 0
 
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None):
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
         self.calls += 1
         if self.calls == 1:
             return LLMResponse(
@@ -183,6 +185,22 @@ class RepetitiveThenGoodClient:
         )
 
 
+class ChatOnlyClient:
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
+        return LLMResponse(
+            content=json.dumps(
+                {
+                    "assistant_message": "That sounds less like a style choice and more like a private test of patience. What part of waiting feels hardest here?",
+                    "progress_label": "Listening: meaning",
+                    "reason": "the user's own words will be more useful than a control here",
+                    "is_ready": False,
+                    "controls": [],
+                }
+            ),
+            source="llamacpp",
+        )
+
+
 def main() -> None:
     original_mode = conversation.CONVERSATION_MODE
     conversation.CONVERSATION_MODE = "model_assisted"
@@ -206,6 +224,10 @@ def main() -> None:
         free_control = conversation.choose_conversation_turn_with_model(profile, fallback, FreeControlClient())
         assert free_control.controls[0].kind == ControlKind.TEXT_REFINEMENT
         assert free_control.progress_label == "Listening: personal meaning"
+
+        chat_only = conversation.choose_conversation_turn_with_model(profile, fallback, ChatOnlyClient())
+        assert chat_only.controls == []
+        assert "waiting feels hardest" in chat_only.assistant_message
 
         slider_profile = conversation.new_profile()
         slider_profile.ideas.extend(["I want something about being positive", "sharp"])

@@ -12,6 +12,7 @@ def main() -> None:
     if status["mode"] == "llamacpp":
         print(status["llamacpp_repo_id"])
         print(status["llamacpp_filename"])
+        print(f'recipe_thinking={status["llamacpp_recipe_thinking"]}')
 
 
 if __name__ == "__main__":
