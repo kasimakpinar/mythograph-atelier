@@ -208,6 +208,47 @@ class ChatOnlyClient:
         )
 
 
+class AlwaysRepeatsTraceQuestionClient:
+    def __init__(self):
+        self.calls = 0
+
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
+        self.calls += 1
+        return LLMResponse(
+            content=json.dumps(
+                {
+                    "assistant_message": (
+                        "That contradiction already has a lot of weight in it - it sounds less like a simple "
+                        "choice and more like a pull between two truths. What feels most true to you here: "
+                        "that this is a real tension in your life, or that you're trying to hold both sides at once?"
+                    ),
+                    "progress_label": "Getting the meaning straight",
+                    "reason": "repeats the trace question with light paraphrasing",
+                    "is_ready": False,
+                    "controls": [
+                        {
+                            "kind": "choice_cards",
+                            "label": "What feels most true?",
+                            "prompt": "Pick the reading that fits best, or tell me in your own words.",
+                            "options": [
+                                "It is a real tension in my life",
+                                "I am trying to hold both sides at once",
+                                "It is more about freedom than loneliness",
+                            ],
+                            "sliders": [],
+                        }
+                    ],
+                }
+            ),
+            source="llamacpp",
+        )
+
+
+class ShouldNotBeCalledClient:
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
+        raise AssertionError("generation intent should bypass the model director")
+
+
 def main() -> None:
     original_mode = conversation.CONVERSATION_MODE
     conversation.CONVERSATION_MODE = "model_assisted"
@@ -263,8 +304,8 @@ def main() -> None:
         assert fresh.controls[0].options[0] == "quiet refusal"
 
         bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
-        assert bad.controls == []
-        assert bad.progress_label == "Understanding your theme"
+        assert bad.is_ready
+        assert bad.controls[0].kind == ControlKind.READY_BUTTON
 
         stance_profile = conversation.new_profile()
         stance_profile.ideas.append("I want something about the calmness in the chaos")
@@ -280,6 +321,52 @@ def main() -> None:
         )
         assert stance_profile.contrasts
         assert not stance_profile.styles
+
+        trace_profile = conversation.new_profile()
+        trace_profile.ideas.append("I feel free, but also strangely lonely.")
+        trace_profile.free_notes.extend(
+            [
+                "There is a trade-off between being free and lonely.",
+                "Sometimes I want lunch alone, but then miss being with friends.",
+            ]
+        )
+        trace_profile.contrasts.append("It is a contradiction I am trying to live with")
+        trace_profile.asked_questions.append(
+            "That contradiction already has a lot of weight in it: freedom and loneliness can sit together, "
+            "but they do not always want to. What feels most true to you here - that this is a real tension "
+            "in your life, or that you are trying to hold both sides at once?"
+        )
+        trace_profile.turn_count = 4
+        trace_profile = conversation.update_scores(trace_profile)
+        assert trace_profile.scores.ready_to_generate
+        repeating_client = AlwaysRepeatsTraceQuestionClient()
+        trace_fallback = conversation.choose_conversation_turn_with_model(
+            trace_profile,
+            conversation.choose_conversation_turn(trace_profile),
+            repeating_client,
+        )
+        assert repeating_client.calls == 4
+        assert trace_fallback.is_ready
+        assert trace_fallback.controls[0].kind == ControlKind.READY_BUTTON
+
+        intent_profile = conversation.new_profile()
+        intent_profile.ideas.append("I feel free, but also strangely lonely.")
+        intent_profile.free_notes.extend(
+            [
+                "There is a trade-off between being free and lonely.",
+                "Lunch alone versus lunch with colleagues is the everyday example.",
+            ]
+        )
+        intent_profile.contrasts.append("I am trying to hold both sides at once")
+        intent_profile.turn_count = 4
+        intent_profile = conversation.update_scores(intent_profile)
+        intent_profile, intent_turn = conversation.advance_conversation(
+            intent_profile,
+            user_message="Create image",
+            client=ShouldNotBeCalledClient(),
+        )
+        assert intent_turn.is_ready
+        assert intent_turn.controls[0].kind == ControlKind.READY_BUTTON
     finally:
         conversation.CONVERSATION_MODE = original_mode
 

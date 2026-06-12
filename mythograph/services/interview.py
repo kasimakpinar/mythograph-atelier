@@ -48,11 +48,20 @@ def update_scores(profile: InterviewProfile) -> InterviewProfile:
     )
     profile.scores.symbolic_material = min(1.0, 0.3 * len(profile.symbols) + 0.2 * len(profile.contrasts))
     profile.scores.surprise_level = 1.0 if any("surprise" in item.lower() for item in profile.styles + profile.symbols + profile.ideas) else profile.scores.surprise_level
+    conversational_ready = (
+        profile.turn_count >= 3
+        and profile.scores.idea_anchor >= 0.55
+        and (bool(profile.contrasts) or bool(profile.styles) or bool(profile.visual_preferences))
+        and (bool(profile.symbols) or len(profile.ideas + profile.free_notes) >= 3)
+    )
     profile.scores.ready_to_generate = (
-        profile.turn_count >= 2
-        and profile.scores.idea_anchor >= 0.5
-        and profile.scores.visual_taste >= 0.45
-        and profile.scores.symbolic_material >= 0.35
+        conversational_ready
+        or (
+            profile.turn_count >= 2
+            and profile.scores.idea_anchor >= 0.5
+            and profile.scores.visual_taste >= 0.45
+            and profile.scores.symbolic_material >= 0.35
+        )
     )
     return profile
 
