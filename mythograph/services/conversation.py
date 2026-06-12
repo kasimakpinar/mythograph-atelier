@@ -1,3 +1,4 @@
+import re
 import time
 
 from mythograph.config import CONVERSATION_MODE, LLAMACPP_CHAT_ENABLED, LLM_CHAT_MAX_TOKENS, ROOT_DIR
@@ -48,6 +49,26 @@ def advance_conversation(
         apply_control_response(profile, control_response)
 
     profile = update_scores(profile)
+    if clean_message and _user_requested_generation(clean_message) and _model_can_generate(profile):
+        turn = _ready_turn()
+        _remember_model_turn(profile, turn)
+        log_event(
+            "conversation_turn",
+            {
+                "profile": profile.model_dump(),
+                "turn": turn.model_dump(),
+            },
+        )
+        log_event(
+            "generation_readiness",
+            {
+                "ready": profile.scores.ready_to_generate,
+                "scores": profile.scores.model_dump(),
+                "turn_count": profile.turn_count,
+            },
+        )
+        return profile, turn
+
     fallback_turn = choose_conversation_turn(profile)
     turn = choose_conversation_turn_with_model(profile, fallback_turn, client)
     _remember_model_turn(profile, turn)
@@ -147,7 +168,7 @@ def choose_conversation_turn_with_model(
             last_content = current_response.content or last_content
             if attempt >= max_attempts - 1:
                 elapsed_seconds = round(time.perf_counter() - started, 3)
-                error_turn = safe_conversation_fallback(profile, last_error)
+                error_turn = safe_conversation_fallback(profile, last_error, can_generate)
                 log_event(
                     "llm_conversation_turn",
                     {
@@ -219,7 +240,19 @@ def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
     )
 
 
-def safe_conversation_fallback(profile: InterviewProfile, detail: str = "") -> ConversationTurn:
+def safe_conversation_fallback(
+    profile: InterviewProfile,
+    detail: str = "",
+    can_generate: bool | None = None,
+) -> ConversationTurn:
+    if can_generate is None:
+        can_generate = _model_can_generate(profile)
+    if can_generate:
+        reason = "Fallback after invalid model output."
+        if detail:
+            reason = f"{reason} {detail[:600]}"
+        return _ready_turn(reason)
+
     idea = _first_nonempty(profile.ideas + profile.free_notes)
     if profile.turn_count <= 2:
         message = (
@@ -244,6 +277,23 @@ def safe_conversation_fallback(profile: InterviewProfile, detail: str = "") -> C
         reason=reason,
         is_ready=False,
         controls=[],
+    )
+
+
+def _ready_turn(reason: str = "profile has enough personal signal for generation") -> ConversationTurn:
+    return ConversationTurn(
+        assistant_message=_ready_message(),
+        progress_label="Ready: create the painting",
+        reason=reason,
+        is_ready=True,
+        controls=[
+            DynamicControl(
+                kind=ControlKind.READY_BUTTON,
+                label="Create artwork",
+                prompt="Generate the painting",
+                options=["Create artwork"],
+            )
+        ],
     )
 
 
@@ -314,12 +364,27 @@ def _texts_too_similar(left: str, right: str) -> bool:
         return False
     if left == right:
         return True
-    left_words = {word for word in left.split() if len(word) > 3}
-    right_words = {word for word in right.split() if len(word) > 3}
-    if len(left_words) < 4 or len(right_words) < 4:
+    left_tokens = _meaning_tokens(left)
+    right_tokens = _meaning_tokens(right)
+    if len(left_tokens) < 4 or len(right_tokens) < 4:
         return False
+    if _shared_ngram(left_tokens, right_tokens, 6):
+        return True
+    left_words = set(left_tokens)
+    right_words = set(right_tokens)
     overlap = len(left_words & right_words) / max(1, min(len(left_words), len(right_words)))
-    return overlap >= 0.72
+    return overlap >= 0.62
+
+
+def _meaning_tokens(value: str) -> list[str]:
+    return [word for word in re.findall(r"[a-z0-9']+", value.lower()) if len(word) > 3]
+
+
+def _shared_ngram(left: list[str], right: list[str], size: int) -> bool:
+    if len(left) < size or len(right) < size:
+        return False
+    left_grams = {tuple(left[index : index + size]) for index in range(len(left) - size + 1)}
+    return any(tuple(right[index : index + size]) in left_grams for index in range(len(right) - size + 1))
 
 
 def _options_too_similar(options: list[str], previous_options: list[str]) -> bool:
@@ -603,6 +668,15 @@ def _recent_choices(profile: InterviewProfile) -> list[str]:
     return [_normalize_text(answer)[:80] for answer in answers[-10:] if _normalize_text(answer)]
 
 
+def _user_requested_generation(message: str) -> bool:
+    text = _normalize_text(message)
+    intent_words = ("create", "generate", "make", "paint", "render")
+    object_words = ("image", "artwork", "painting", "piece", "art")
+    if any(phrase in text for phrase in ["you can create", "create it now", "generate it now", "ready to create"]):
+        return True
+    return any(word in text for word in intent_words) and any(word in text for word in object_words)
+
+
 def _first_nonempty(items: list[str]) -> str:
     for item in items:
         if item:
@@ -683,7 +757,7 @@ def sanitize_conversation_turn(
     return candidate
 
 
-def _ready_message(profile: InterviewProfile) -> str:
+def _ready_message(profile: InterviewProfile | None = None) -> str:
     return (
         "I have enough now. I will turn what you shared into a simple abstract painting recipe, "
         "then render it as an image."
