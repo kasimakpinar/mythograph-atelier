@@ -564,9 +564,9 @@ def _rotate_starter(starters_data: list[dict] | None, index: int | None):
 
 def _starter_button_update(starters: list[ConversationStarter], index: int):
     if not starters:
-        return gr.update(value=STARTER_LOADING_LABEL, interactive=False)
+        return gr.update(value=STARTER_LOADING_LABEL, visible=True, interactive=False)
     starter = starters[index % len(starters)]
-    return gr.update(value=starter.text, interactive=True)
+    return gr.update(value=starter.text, visible=True, interactive=True)
 
 
 def _starter_models(starters_data: list[dict] | None) -> list[ConversationStarter]:
