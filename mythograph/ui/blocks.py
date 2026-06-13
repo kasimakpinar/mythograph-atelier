@@ -8,13 +8,14 @@ from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ConversationStarter, ControlKind, ControlResponse, ConversationTurn
 from mythograph.services.art_recipe import build_art_recipe_with_model
 from mythograph.services.conversation import advance_conversation, model_error_turn, new_profile, start_session
-from mythograph.services.starters import fallback_starters, generate_conversation_starters
+from mythograph.services.starters import generate_conversation_starters
 from mythograph.services.trace_logger import export_trace, log_event
 from mythograph.ui.examples import REGENERATION_OPTIONS
 from mythograph.ui.waiting_gallery import render_waiting_gallery
 
 
-STARTER_CHIPS = fallback_starters(6)
+STARTER_LOADING_LABEL = "Model is loading..."
+STARTER_COUNT = 3
 
 
 def build_demo() -> gr.Blocks:
@@ -36,7 +37,8 @@ def build_demo() -> gr.Blocks:
         chat_history_state = gr.State([])
         turn_state = gr.State(initial_turn.model_dump())
         recipe_state = gr.State(None)
-        starter_state = gr.State([starter.model_dump() for starter in STARTER_CHIPS])
+        starter_state = gr.State([])
+        starter_index_state = gr.State(0)
         generate_action_state = gr.State("generate")
         regenerate_action_state = gr.State("regenerate")
 
@@ -64,10 +66,13 @@ def build_demo() -> gr.Blocks:
                 refresh_starters = gr.Button("Refresh examples", elem_classes=["ma-ghost"])
                 reset_from_start = gr.Button("Reset", elem_classes=["ma-ghost"])
             with gr.Row(elem_classes=["ma-starters"]):
-                starter_buttons = [
-                    gr.Button(starter.title, elem_classes=["ma-chip"], size="sm")
-                    for starter in STARTER_CHIPS
-                ]
+                starter_button = gr.Button(
+                    STARTER_LOADING_LABEL,
+                    elem_classes=["ma-chip", "ma-rotating-starter"],
+                    size="sm",
+                    interactive=False,
+                )
+                starter_timer = gr.Timer(value=4, active=True)
 
         with gr.Group(visible=False, elem_id="ma-chat-panel") as chat_panel:
             with gr.Row(elem_classes=["ma-topbar"]):
@@ -230,24 +235,28 @@ def build_demo() -> gr.Blocks:
             outputs=flow_outputs,
         )
 
-        for index, button in enumerate(starter_buttons):
-            starter_index_state = gr.State(index)
-            button.click(
-                fn=_submit_starter,
-                inputs=[profile_state, chat_history_state, starter_state, starter_index_state],
-                outputs=flow_outputs,
-            )
+        starter_button.click(
+            fn=_submit_starter,
+            inputs=[profile_state, chat_history_state, starter_state, starter_index_state],
+            outputs=flow_outputs,
+        )
 
         refresh_starters.click(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, *starter_buttons],
+            outputs=[starter_state, starter_index_state, starter_button],
         )
 
         demo.load(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, *starter_buttons],
+            outputs=[starter_state, starter_index_state, starter_button],
+            show_progress="hidden",
+        )
+        starter_timer.tick(
+            fn=_rotate_starter,
+            inputs=[starter_state, starter_index_state],
+            outputs=[starter_index_state, starter_button],
             show_progress="hidden",
         )
 
@@ -296,13 +305,13 @@ def build_demo() -> gr.Blocks:
         reset_button.click(fn=_reset, outputs=flow_outputs).then(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, *starter_buttons],
+            outputs=[starter_state, starter_index_state, starter_button],
             show_progress="hidden",
         )
         reset_from_start.click(fn=_reset, outputs=flow_outputs).then(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, *starter_buttons],
+            outputs=[starter_state, starter_index_state, starter_button],
             show_progress="hidden",
         )
 
@@ -361,7 +370,10 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
 
 def _submit_starter(profile_data: dict, history: list[dict], starters_data: list[dict], index: int):
     starters = _starter_models(starters_data)
-    starter = starters[index] if 0 <= int(index) < len(starters) else fallback_starters(1)[0]
+    if not starters:
+        yield _reset()
+        return
+    starter = starters[index % len(starters)]
     text = starter.text
     director_history = (history or []) + [_message("user", text)]
     yield _thinking_render(_profile(profile_data), director_history, _thinking_label(history))
@@ -374,9 +386,24 @@ def _submit_starter(profile_data: dict, history: list[dict], starters_data: list
 
 @spaces.GPU(duration=60)
 def _refresh_starters(starters_data: list[dict]):
-    starters = generate_conversation_starters(count=6)
-    updates = [gr.update(value=starter.title) for starter in starters]
-    return [[starter.model_dump() for starter in starters], *updates]
+    starters = generate_conversation_starters(count=STARTER_COUNT)
+    data = [starter.model_dump() for starter in starters]
+    return data, 0, _starter_button_update(starters, 0)
+
+
+def _rotate_starter(starters_data: list[dict] | None, index: int | None):
+    starters = _starter_models(starters_data)
+    if not starters:
+        return 0, gr.update(value=STARTER_LOADING_LABEL, interactive=False)
+    next_index = ((index or 0) + 1) % len(starters)
+    return next_index, _starter_button_update(starters, next_index)
+
+
+def _starter_button_update(starters: list[ConversationStarter], index: int):
+    if not starters:
+        return gr.update(value=STARTER_LOADING_LABEL, interactive=False)
+    starter = starters[index % len(starters)]
+    return gr.update(value=starter.text, interactive=True)
 
 
 def _starter_models(starters_data: list[dict] | None) -> list[ConversationStarter]:
@@ -386,7 +413,7 @@ def _starter_models(starters_data: list[dict] | None) -> list[ConversationStarte
             starters.append(ConversationStarter.model_validate(item))
         except Exception:
             continue
-    return starters or fallback_starters(6)
+    return starters
 
 
 def _submit_choice(profile_data: dict, history: list[dict], turn_data: dict, value: str | None):

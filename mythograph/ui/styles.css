@@ -110,6 +110,21 @@ button.ma-chip {
   border-color: rgba(22, 21, 19, 0.16) !important;
   background: rgba(255, 250, 241, 0.72) !important;
   color: var(--ma-soft-ink) !important;
+  transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+button.ma-rotating-starter {
+  width: min(680px, 100%) !important;
+  min-height: 52px !important;
+  white-space: normal !important;
+  line-height: 1.35 !important;
+  padding: 12px 16px !important;
+}
+
+button.ma-rotating-starter:hover {
+  transform: translateY(-1px);
+  border-color: rgba(22, 21, 19, 0.32) !important;
+  background: rgba(255, 250, 241, 0.94) !important;
 }
 
 #ma-chat-panel {

@@ -1,4 +1,5 @@
 import time
+import random
 
 from mythograph.config import LLM_CHAT_MAX_TOKENS, ROOT_DIR
 from mythograph.models.llm_client import LLMClient, extract_json_object
@@ -10,19 +11,23 @@ from mythograph.ui.examples import STARTER_IDEAS
 FALLBACK_STARTERS = [
     ConversationStarter(title=title, text=text)
     for title, text in [
-        ("A feeling", "I want something about being tired but still trying."),
-        ("A season", "The joy of spring after a long winter."),
-        ("A memory", "I miss a place that does not exist anymore."),
-        ("A contradiction", "I feel free, but also strangely lonely."),
-        ("After a hard week", "I want it to feel like a clean room after a hard week."),
-        ("A strange sentence", "I am not lost, but I do not recognize the road."),
+        ("A small shift", "I noticed I am different in a way I cannot explain yet."),
+        ("An ordinary object", "There is a cup on my desk that somehow feels like this whole month."),
+        ("Almost ready", "I want something about being close to changing, but not there yet."),
+        ("A quiet win", "I did one small thing right, and I want to remember that it counts."),
+        ("A sentence", "I keep thinking about how a place can be gone and still feel nearby."),
+        ("Weather inside", "Today feels bright at the edges and heavy in the middle."),
+        ("After noise", "I want something about the silence after too many opinions."),
+        ("A private hope", "There is something I am hoping for, but I do not want to say it too loudly."),
+        ("Two truths", "I feel grateful and restless at the same time."),
+        ("Small courage", "I want something about trying again without making a big speech about it."),
     ]
 ]
 
 
 def fallback_starters(count: int = 6) -> list[ConversationStarter]:
     starters = FALLBACK_STARTERS or [ConversationStarter(title=title, text=text) for title, text in STARTER_IDEAS]
-    return starters[:count]
+    return random.sample(starters, k=min(count, len(starters)))
 
 
 def generate_conversation_starters(client: LLMClient | None = None, count: int = 6) -> list[ConversationStarter]:
@@ -34,8 +39,18 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
         "task": "conversation_starters",
         "count": count,
         "tone": "casual, warm, varied, understandable",
-        "goal": "Generate ordinary human starting examples for Mythograph Atelier.",
-        "avoid": ["heavy art jargon", "generic inspirational quotes", "overly poetic abstractions"],
+        "goal": "Generate completely random ordinary human starting sentences for Mythograph Atelier.",
+        "randomness": (
+            "Do not use a fixed topic list. Mix everyday observations, memories, contradictions, moods, "
+            "objects, hopes, weather, work, family, small wins, and strange thoughts freely."
+        ),
+        "avoid": [
+            "fixed category labels",
+            "heavy art jargon",
+            "generic inspirational quotes",
+            "overly poetic abstractions",
+            "reusing the fallback examples",
+        ],
     }
     started = time.perf_counter()
     response = llm.complete_json(
