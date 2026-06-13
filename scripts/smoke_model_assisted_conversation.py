@@ -5,7 +5,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mythograph.models.llm_client import LLMResponse
-from mythograph.schemas.ui import ControlKind
 import mythograph.services.conversation as conversation
 
 
@@ -40,19 +39,11 @@ class RepairClient:
         return LLMResponse(
             content=json.dumps(
                 {
-                    "assistant_message": "I can use that. Which phrase feels closest to the center?",
+                    "assistant_message": "I can use that. What does that pressure ask you to protect?",
                     "progress_label": "Listening",
                     "reason": "repair returned valid JSON",
                     "is_ready": False,
-                    "controls": [
-                        {
-                            "kind": "choice_cards",
-                            "label": "Center",
-                            "prompt": "Pick the closest phrase.",
-                            "options": ["care under pressure", "guilt without surrender", "resistance as tenderness"],
-                            "sliders": [],
-                        }
-                    ],
+                    "controls": [],
                 }
             ),
             source="llamacpp",
@@ -86,7 +77,7 @@ def main() -> None:
     repair_client = RepairClient()
     repaired = conversation.choose_conversation_turn_with_model(_profile(), repair_client, history)
     assert repair_client.calls == 2
-    assert repaired.controls[0].kind == ControlKind.CHOICE_CARDS
+    assert repaired.controls == []
 
     bad = conversation.choose_conversation_turn_with_model(_profile(), BadClient(), history)
     assert bad.controls == []

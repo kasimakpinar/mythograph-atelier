@@ -112,11 +112,6 @@ def choose_conversation_turn_with_model(
         "allowed_control_kinds": allowed_control_kinds,
         "control_guidance": {
             "empty_controls": "Use plain chat when a real question is better than buttons.",
-            "choice_cards": "3-6 interpretations, emotional angles, stances, or readings.",
-            "multi_choice_cards": "3-6 compatible tensions, values, memories, or admissions; user may pick several.",
-            "slider_group": "2-3 conceptual dials such as honesty, control, distance, tenderness, acceptance, resistance.",
-            "swatch_picker": "rare mood climates, not literal color settings.",
-            "text_refinement": "invite a free reply in the main chat when the topic needs the user's own words.",
             "ready_button": "when can_generate is true and the profile has enough personal signal.",
         },
     }
@@ -427,16 +422,7 @@ def _missing_signals(profile: InterviewProfile) -> list[str]:
 
 
 def _allowed_control_kinds(can_generate: bool = False) -> list[str]:
-    kinds = [
-        ControlKind.TEXT_REFINEMENT.value,
-        ControlKind.CHOICE_CARDS.value,
-        ControlKind.MULTI_CHOICE_CARDS.value,
-        ControlKind.SLIDER_GROUP.value,
-        ControlKind.SWATCH_PICKER.value,
-    ]
-    if can_generate:
-        kinds.append(ControlKind.READY_BUTTON.value)
-    return kinds
+    return [ControlKind.READY_BUTTON.value] if can_generate else []
 
 
 def _user_requested_generation(message: str) -> bool:
