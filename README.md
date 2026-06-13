@@ -77,9 +77,27 @@ MYTHOGRAPH_IMAGE_HEIGHT=768
 MYTHOGRAPH_IMAGE_STEPS=8
 MYTHOGRAPH_IMAGE_DTYPE=float16
 MYTHOGRAPH_IMAGE_CPU_OFFLOAD=1
+
+# Optional fine-tuned FLUX LoRA. Set USE_FT_IMAGE_MODEL=false for base FLUX.
+USE_FT_IMAGE_MODEL=true
+FT_IMAGE_MODEL_REPO=kasimakpinar/mythograph-atelier-flux2-klein-lora
+FT_IMAGE_MODEL_PATH=
+FT_IMAGE_MODEL_WEIGHT_NAME=
+FT_IMAGE_MODEL_SCALE=1.0
+FT_IMAGE_MODEL_TRIGGER=MYTHABS1
+FT_IMAGE_MODEL_PREPEND_TRIGGER=true
+
+# FLUX_* aliases are also supported and override the matching MYTHOGRAPH_IMAGE_* values.
+FLUX_MODEL_ID=black-forest-labs/FLUX.2-klein-4B
+FLUX_NUM_INFERENCE_STEPS=8
+FLUX_GUIDANCE_SCALE=1.0
+FLUX_WIDTH=1024
+FLUX_HEIGHT=768
 ```
 
 The default MVP path uses short GPU llama.cpp calls for creative chat turns, then enables Nemotron thinking for the final recipe only. Before FLUX renders, the app unloads llama.cpp and clears CUDA memory so image generation can own the next ZeroGPU allocation.
+
+The LoRA trigger word is applied only inside the FLUX generation call. It is not written into the displayed recipe or the visible image prompt.
 
 ## Waiting Gallery
 

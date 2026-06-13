@@ -2,6 +2,13 @@ from pathlib import Path
 import os
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 APP_TITLE = "Mythograph Atelier"
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
@@ -33,11 +40,31 @@ LLAMACPP_CHAT_FORMAT = os.getenv("MYTHOGRAPH_LLAMACPP_CHAT_FORMAT", "").strip() 
 LLAMACPP_VERBOSE = os.getenv("MYTHOGRAPH_LLAMACPP_VERBOSE", "0").strip() == "1"
 
 IMAGE_MODE = os.getenv("MYTHOGRAPH_IMAGE_MODE", "flux").strip().lower()
-IMAGE_MODEL_ID = os.getenv("MYTHOGRAPH_IMAGE_MODEL_ID", "black-forest-labs/FLUX.2-klein-4B")
-IMAGE_WIDTH = int(os.getenv("MYTHOGRAPH_IMAGE_WIDTH", "1024"))
-IMAGE_HEIGHT = int(os.getenv("MYTHOGRAPH_IMAGE_HEIGHT", "768"))
-IMAGE_STEPS = int(os.getenv("MYTHOGRAPH_IMAGE_STEPS", "8"))
+IMAGE_MODEL_ID = os.getenv("FLUX_MODEL_ID", os.getenv("MYTHOGRAPH_IMAGE_MODEL_ID", "black-forest-labs/FLUX.2-klein-4B"))
+IMAGE_WIDTH = int(os.getenv("FLUX_WIDTH", os.getenv("MYTHOGRAPH_IMAGE_WIDTH", "1024")))
+IMAGE_HEIGHT = int(os.getenv("FLUX_HEIGHT", os.getenv("MYTHOGRAPH_IMAGE_HEIGHT", "768")))
+IMAGE_STEPS = int(os.getenv("FLUX_NUM_INFERENCE_STEPS", os.getenv("MYTHOGRAPH_IMAGE_STEPS", "8")))
 IMAGE_SEED = int(os.getenv("MYTHOGRAPH_IMAGE_SEED", "0"))
 IMAGE_DTYPE = os.getenv("MYTHOGRAPH_IMAGE_DTYPE", "float16").strip().lower()
-IMAGE_GUIDANCE_SCALE = float(os.getenv("MYTHOGRAPH_IMAGE_GUIDANCE_SCALE", "1.0"))
-IMAGE_CPU_OFFLOAD = os.getenv("MYTHOGRAPH_IMAGE_CPU_OFFLOAD", "1").strip() == "1"
+IMAGE_GUIDANCE_SCALE = float(os.getenv("FLUX_GUIDANCE_SCALE", os.getenv("MYTHOGRAPH_IMAGE_GUIDANCE_SCALE", "1.0")))
+IMAGE_CPU_OFFLOAD = env_bool("MYTHOGRAPH_IMAGE_CPU_OFFLOAD", True)
+
+USE_FT_IMAGE_MODEL = env_bool("USE_FT_IMAGE_MODEL", env_bool("USE_MYTHOGRAPH_LORA", True))
+FT_IMAGE_MODEL_REPO = os.getenv(
+    "FT_IMAGE_MODEL_REPO",
+    os.getenv("MYTHOGRAPH_LORA_REPO", "kasimakpinar/mythograph-atelier-flux2-klein-lora"),
+)
+FT_IMAGE_MODEL_PATH = os.getenv("FT_IMAGE_MODEL_PATH", os.getenv("MYTHOGRAPH_LORA_PATH", "")).strip()
+FT_IMAGE_MODEL_WEIGHT_NAME = os.getenv(
+    "FT_IMAGE_MODEL_WEIGHT_NAME",
+    os.getenv("MYTHOGRAPH_LORA_WEIGHT_NAME", ""),
+).strip()
+FT_IMAGE_MODEL_SCALE = float(os.getenv("FT_IMAGE_MODEL_SCALE", os.getenv("MYTHOGRAPH_LORA_SCALE", "1.0")))
+FT_IMAGE_MODEL_TRIGGER = os.getenv(
+    "FT_IMAGE_MODEL_TRIGGER",
+    os.getenv("MYTHOGRAPH_LORA_TRIGGER", "MYTHABS1"),
+)
+FT_IMAGE_MODEL_PREPEND_TRIGGER = env_bool(
+    "FT_IMAGE_MODEL_PREPEND_TRIGGER",
+    env_bool("MYTHOGRAPH_LORA_PREPEND_TRIGGER", True),
+)
