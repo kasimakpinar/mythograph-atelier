@@ -17,8 +17,8 @@ class GoodClient:
         if "invalid_json" in user_payload:
             return LLMResponse(content=user_payload["invalid_json"], source="llamacpp")
         assert "atelier_state" in user_payload
+        assert "conversation_history" in user_payload
         assert user_payload["task"] == "conversation_with_ui"
-        assert "chat_history" not in user_payload
         assert "fallback_turn" not in user_payload
         assert "available_option_sets" not in user_payload
         assert "next_need" in user_payload
@@ -304,8 +304,9 @@ def main() -> None:
         assert fresh.controls[0].options[0] == "quiet refusal"
 
         bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
-        assert bad.is_ready
-        assert bad.controls[0].kind == ControlKind.READY_BUTTON
+        assert not bad.is_ready
+        assert bad.controls == []
+        assert "could not produce a valid next step" in bad.assistant_message
 
         stance_profile = conversation.new_profile()
         stance_profile.ideas.append("I want something about the calmness in the chaos")
@@ -346,8 +347,9 @@ def main() -> None:
             repeating_client,
         )
         assert repeating_client.calls == 4
-        assert trace_fallback.is_ready
-        assert trace_fallback.controls[0].kind == ControlKind.READY_BUTTON
+        assert not trace_fallback.is_ready
+        assert trace_fallback.controls == []
+        assert "could not produce a valid next step" in trace_fallback.assistant_message
 
         intent_profile = conversation.new_profile()
         intent_profile.ideas.append("I feel free, but also strangely lonely.")

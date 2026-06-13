@@ -361,7 +361,7 @@ def _submit_text(profile_data: dict, history: list[dict], text: str):
         return
     director_history = (history or []) + [_message("user", clean)]
     yield _thinking_render(_profile(profile_data), director_history, _thinking_label(history))
-    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, clean, None)
+    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, clean, None, director_history)
     profile = _profile(profile_data)
     turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
@@ -377,7 +377,7 @@ def _submit_starter(profile_data: dict, history: list[dict], starters_data: list
     text = starter.text
     director_history = (history or []) + [_message("user", text)]
     yield _thinking_render(_profile(profile_data), director_history, _thinking_label(history))
-    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, text, None)
+    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, text, None, director_history)
     profile = _profile(profile_data)
     turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
@@ -509,7 +509,7 @@ def _slider_summary(control, sliders: dict[str, float]) -> str:
 def _submit_control(profile_data: dict, history: list[dict], response: ControlResponse, user_summary: str):
     director_history = (history or []) + [_message("user", user_summary)]
     yield _thinking_render(_profile(profile_data), director_history, _thinking_label(history))
-    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, "", response.model_dump())
+    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, "", response.model_dump(), director_history)
     profile = _profile(profile_data)
     turn = _turn(turn_data)
     chat = director_history + [_message("assistant", turn.assistant_message)]
@@ -554,7 +554,12 @@ def _activity_for_turn(turn: ConversationTurn, default: str) -> str:
 
 
 @spaces.GPU(duration=60)
-def _advance_conversation_on_gpu(profile_data: dict, user_message: str, control_response_data: dict | None):
+def _advance_conversation_on_gpu(
+    profile_data: dict,
+    user_message: str,
+    control_response_data: dict | None,
+    conversation_history: list[dict] | None = None,
+):
     profile = _profile(profile_data)
     try:
         response = ControlResponse.model_validate(control_response_data) if control_response_data else None
@@ -562,6 +567,7 @@ def _advance_conversation_on_gpu(profile_data: dict, user_message: str, control_
             profile,
             user_message=user_message,
             control_response=response,
+            conversation_history=conversation_history,
         )
         return profile.model_dump(), turn.model_dump()
     except Exception as exc:
