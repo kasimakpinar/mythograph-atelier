@@ -15,12 +15,14 @@
   --ma-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
   --ma-radius: 8px;
   --ma-radius-pill: 999px;
+  --ma-app-height: clamp(640px, 100vh, 920px);
 }
 
 html,
 body {
-  min-height: 100dvh;
+  min-height: 0;
   background: var(--ma-bg) !important;
+  overflow-x: hidden;
 }
 
 body,
@@ -28,7 +30,7 @@ body,
 body .gradio-container,
 main,
 #root {
-  min-height: 100dvh;
+  min-height: 0;
   overflow-x: hidden;
   background:
     linear-gradient(135deg, rgba(139, 109, 246, 0.16), transparent 38%),
@@ -42,9 +44,27 @@ main,
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+.gradio-container,
+body .gradio-container,
+main {
+  min-height: var(--ma-app-height) !important;
+  height: var(--ma-app-height) !important;
+  max-height: var(--ma-app-height) !important;
+  overflow: hidden !important;
+}
+
+footer,
+.footer,
+.built-with {
+  display: none !important;
+}
+
 #ma-shell {
   max-width: none;
-  min-height: 100dvh;
+  min-height: 0;
+  height: var(--ma-app-height);
+  max-height: var(--ma-app-height);
+  overflow: hidden;
 }
 
 #ma-shell .contain,
@@ -67,11 +87,15 @@ main,
 }
 
 #ma-start-panel {
-  min-height: 100dvh;
+  height: var(--ma-app-height);
+  min-height: 0;
+  max-height: var(--ma-app-height);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 32px;
+  overflow-y: auto;
+  overflow-x: hidden;
   background:
     linear-gradient(135deg, rgba(139, 109, 246, 0.16), transparent 38%),
     linear-gradient(215deg, rgba(216, 166, 87, 0.14), transparent 42%),
@@ -204,7 +228,8 @@ button.ma-rotating-starter:hover {
   inset: 0;
   z-index: 50;
   width: 100vw;
-  height: 100dvh;
+  height: var(--ma-app-height);
+  max-height: var(--ma-app-height);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -213,6 +238,14 @@ button.ma-rotating-starter:hover {
     linear-gradient(215deg, rgba(216, 166, 87, 0.14), transparent 42%),
     linear-gradient(180deg, rgba(81, 214, 196, 0.08), transparent 58%),
     var(--ma-bg) !important;
+}
+
+#ma-chat-panel > .styler {
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
 }
 
 .ma-topbar {
@@ -253,6 +286,14 @@ button.ma-rotating-starter:hover {
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
+}
+
+#ma-studio-frame > .styler {
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
 }
 
 #ma-stage-scroll {
