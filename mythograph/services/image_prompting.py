@@ -10,10 +10,10 @@ def env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def env_bool_any(primary: str, fallback: str, default: bool = False) -> bool:
+def env_bool_any(primary: str, secondary: str, default: bool = False) -> bool:
     if os.getenv(primary) is not None:
         return env_bool(primary, default)
-    return env_bool(fallback, default)
+    return env_bool(secondary, default)
 
 
 def normalize_lora_trigger(trigger: str) -> str:

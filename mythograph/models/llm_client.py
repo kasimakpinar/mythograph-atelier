@@ -14,13 +14,11 @@ from typing import Any
 from mythograph.config import (
     LLAMACPP_CHAT_FORMAT,
     LLAMACPP_FILENAME,
-    LLAMACPP_CHAT_ENABLED,
     LLAMACPP_FLASH_ATTN,
     LLAMACPP_N_CTX,
     LLAMACPP_N_GPU_LAYERS,
     LLAMACPP_N_THREADS,
     LLAMACPP_PRELOAD,
-    LLAMACPP_RECIPE_ENABLED,
     LLAMACPP_RECIPE_THINKING,
     LLAMACPP_REPO_ID,
     LLAMACPP_UNLOAD_AFTER_CALL,
@@ -70,8 +68,6 @@ class LLMClient:
         response_format: dict[str, str] | None = None,
         thinking: bool = False,
     ) -> LLMResponse:
-        if self.mode == "mock":
-            return LLMResponse(content="", source="mock")
         if self.mode == "llamacpp":
             return LlamaCppClient().complete_json(
                 system_prompt,
@@ -81,6 +77,9 @@ class LLMClient:
                 response_format=response_format,
                 thinking=thinking,
             )
+
+        if self.mode != "local":
+            return LLMResponse(content="", source="error", error=f"Unknown LLM mode '{self.mode}'.")
 
         started = time.perf_counter()
         payload = {
@@ -115,7 +114,7 @@ class LLMClient:
         except (KeyError, json.JSONDecodeError, TimeoutError, urllib.error.URLError, OSError) as exc:
             return LLMResponse(
                 content="",
-                source="fallback",
+                source="error",
                 error=str(exc),
                 elapsed_seconds=round(time.perf_counter() - started, 3),
             )
@@ -140,7 +139,7 @@ class LlamaCppClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
             ]
-            return self._complete_with_fallbacks(
+            return self._complete_with_compatibility_retries(
                 llm=llm,
                 messages=messages,
                 max_tokens=max_tokens,
@@ -152,7 +151,7 @@ class LlamaCppClient:
         except Exception as exc:
             return LLMResponse(
                 content="",
-                source="fallback",
+                source="error",
                 error=f"llama.cpp unavailable: {exc}",
                 elapsed_seconds=round(time.perf_counter() - started, 3),
             )
@@ -172,7 +171,7 @@ class LlamaCppClient:
         started = time.perf_counter()
         try:
             llm = cls._load()
-            return cls._complete_with_fallbacks(
+            return cls._complete_with_compatibility_retries(
                 llm=llm,
                 messages=messages,
                 max_tokens=max_tokens,
@@ -184,7 +183,7 @@ class LlamaCppClient:
         except Exception as exc:
             return LLMResponse(
                 content="",
-                source="fallback",
+                source="error",
                 error=f"llama.cpp unavailable: {exc}",
                 elapsed_seconds=round(time.perf_counter() - started, 3),
             )
@@ -193,7 +192,7 @@ class LlamaCppClient:
                 cls.unload()
 
     @staticmethod
-    def _complete_with_fallbacks(
+    def _complete_with_compatibility_retries(
         llm: Any,
         messages: list[dict[str, str]],
         max_tokens: int,
@@ -213,7 +212,7 @@ class LlamaCppClient:
         if thinking:
             chat_kwargs["chat_template_kwargs"] = {"enable_thinking": True}
 
-        fallback_kwargs = [
+        retry_kwargs = [
             chat_kwargs,
             {key: value for key, value in chat_kwargs.items() if key != "response_format"},
             {key: value for key, value in chat_kwargs.items() if key != "chat_template_kwargs"},
@@ -224,7 +223,7 @@ class LlamaCppClient:
             },
         ]
         seen: set[tuple[str, ...]] = set()
-        for kwargs in fallback_kwargs:
+        for kwargs in retry_kwargs:
             signature = tuple(sorted(kwargs))
             if signature in seen:
                 continue
@@ -261,7 +260,7 @@ class LlamaCppClient:
 
         return LLMResponse(
             content="",
-            source="fallback",
+            source="error",
             error="; ".join(errors),
             elapsed_seconds=round(time.perf_counter() - started, 3),
         )
@@ -290,7 +289,7 @@ class LlamaCppClient:
             from llama_cpp import Llama
         except ImportError as exc:
             raise RuntimeError(
-                "Install llama-cpp-python and huggingface-hub, or use MYTHOGRAPH_LLM_MODE=mock/local."
+                "Install llama-cpp-python and huggingface-hub, or use MYTHOGRAPH_LLM_MODE=local."
             ) from exc
 
         kwargs: dict[str, Any] = {
@@ -327,8 +326,6 @@ def runtime_status() -> dict[str, Any]:
                 "llamacpp_n_gpu_layers": LLAMACPP_N_GPU_LAYERS,
                 "llamacpp_n_threads": LLAMACPP_N_THREADS,
                 "llamacpp_preload": LLAMACPP_PRELOAD,
-                "llamacpp_chat_enabled": LLAMACPP_CHAT_ENABLED,
-                "llamacpp_recipe_enabled": LLAMACPP_RECIPE_ENABLED,
                 "llamacpp_recipe_thinking": LLAMACPP_RECIPE_THINKING,
                 "llamacpp_unload_after_call": LLAMACPP_UNLOAD_AFTER_CALL,
                 "llamacpp_flash_attn": LLAMACPP_FLASH_ATTN,
@@ -344,7 +341,7 @@ def preload_llamacpp_if_configured() -> LLMResponse | None:
         LlamaCppClient._load()
         return LLMResponse(content="", source="llamacpp")
     except Exception as exc:
-        return LLMResponse(content="", source="fallback", error=f"llama.cpp preload failed: {exc}")
+        return LLMResponse(content="", source="error", error=f"llama.cpp preload failed: {exc}")
 
 
 def _preload_cuda_libraries() -> None:

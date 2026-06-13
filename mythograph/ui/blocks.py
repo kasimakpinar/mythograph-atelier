@@ -325,14 +325,13 @@ def _format_runtime_status() -> str:
         model = (
             f'{status["llamacpp_repo_id"]} / {status["llamacpp_filename"]} '
             f'(CPU threads: {status["llamacpp_n_threads"]}, preload: {status["llamacpp_preload"]}, '
-            f'GPU layers: {status["llamacpp_n_gpu_layers"]}, chat: {status["llamacpp_chat_enabled"]}, '
-            f'recipe: {status["llamacpp_recipe_enabled"]}, thinking: {status["llamacpp_recipe_thinking"]}, '
+            f'GPU layers: {status["llamacpp_n_gpu_layers"]}, thinking: {status["llamacpp_recipe_thinking"]}, '
             f'unload: {status["llamacpp_unload_after_call"]})'
         )
     elif mode == "local":
         model = f'{status["openai_compatible_model"]} at {status["openai_compatible_base_url"]}'
     else:
-        model = "deterministic fallback"
+        model = "unavailable"
     return f"Runtime: `{mode}` | Text model: `{model}`"
 
 
@@ -386,7 +385,11 @@ def _submit_starter(profile_data: dict, history: list[dict], starters_data: list
 
 @spaces.GPU(duration=60)
 def _refresh_starters(starters_data: list[dict]):
-    starters = generate_conversation_starters(count=STARTER_COUNT)
+    try:
+        starters = generate_conversation_starters(count=STARTER_COUNT)
+    except Exception as exc:
+        log_event("llm_conversation_starters", {"source": "error", "error": str(exc), "retry_count": 0})
+        return [], 0, gr.update(value="Starter generation failed. Type your own first sentence.", interactive=False)
     data = [starter.model_dump() for starter in starters]
     return data, 0, _starter_button_update(starters, 0)
 
@@ -545,11 +548,8 @@ def _thinking_label(history: list[dict] | None) -> str:
 
 
 def _activity_for_turn(turn: ConversationTurn, default: str) -> str:
-    if turn.reason.startswith("llama.cpp did not return valid schema JSON"):
-        return (
-            "GPU text model needed the safe conversation fallback.\n"
-            "You can keep typing normally; Download trace has the raw runtime details."
-        )
+    if turn.reason.startswith("Text model error"):
+        return f"{turn.assistant_message}\n{turn.reason}"
     return default
 
 
@@ -574,9 +574,8 @@ def _advance_conversation_on_gpu(
         log_event(
             "llm_conversation_turn",
             {
-                "source": "fallback",
+                "source": "error",
                 "error": f"ZeroGPU llama.cpp turn failed: {exc}",
-                "used_fallback": False,
                 "retry_count": 0,
             },
         )
@@ -710,7 +709,18 @@ def _prepare_generation(profile_data: dict, history: list[dict], recipe_data: di
         "GPU text recipe is being prepared.",
         waiting_html=render_waiting_gallery("The art recipe is being written now. Meanwhile, you can take a look at the gallery."),
     )
-    recipe = build_art_recipe_with_model(profile)
+    try:
+        recipe = build_art_recipe_with_model(profile)
+    except Exception as exc:
+        error_turn = model_error_turn("The recipe model failed after retries. Please try again.", str(exc))
+        yield _render(
+            profile,
+            working_history + [_message("assistant", error_turn.assistant_message)],
+            error_turn,
+            recipe_data,
+            f"{error_turn.assistant_message}\n{error_turn.reason}",
+        )
+        return
     yield _render(
         profile,
         working_history,
@@ -741,7 +751,18 @@ def _prepare_regeneration(profile_data: dict, history: list[dict], recipe_data: 
         "GPU text recipe revision is being prepared.",
         waiting_html=render_waiting_gallery("The recipe is being revised now. Meanwhile, you can take a look at the gallery."),
     )
-    recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
+    try:
+        recipe = build_art_recipe_with_model(profile, instruction or "Surprise me")
+    except Exception as exc:
+        error_turn = model_error_turn("The recipe model failed after retries. Please try again.", str(exc))
+        yield _render(
+            profile,
+            working_history + [_message("assistant", error_turn.assistant_message)],
+            error_turn,
+            recipe_data,
+            f"{error_turn.assistant_message}\n{error_turn.reason}",
+        )
+        return
     yield _render(
         profile,
         working_history,
@@ -789,7 +810,29 @@ def _render_prepared_image(
         recipe=recipe,
         waiting_html=render_waiting_gallery("The image is being generated now. Meanwhile, you can take a look at the gallery."),
     )
-    image_result = ImageClient().generate(recipe)
+    try:
+        image_result = ImageClient().generate(recipe)
+    except Exception as exc:
+        log_event(
+            "image_generation",
+            {
+                "source": "error",
+                "error": str(exc),
+                "image_path": None,
+            },
+        )
+        error_turn = model_error_turn("Image generation failed. Please try again.", str(exc))
+        yield _render(
+            profile,
+            (history or []) + [_message("assistant", error_turn.assistant_message)],
+            error_turn,
+            recipe.model_dump(),
+            f"{error_turn.assistant_message}\n{error_turn.reason}",
+            None,
+            recipe,
+            False,
+        )
+        return
     log_event(
         "image_generation",
         {
@@ -812,7 +855,7 @@ def _render_prepared_image(
             is_ready=False,
         ),
         recipe.model_dump(),
-        f"Generation complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and fallback status.",
+        f"Generation complete.\nImage source: {image_result.source}\nDownload the trace to confirm model source and errors.",
         image_result.path,
         recipe,
         True,

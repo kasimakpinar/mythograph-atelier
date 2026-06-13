@@ -30,7 +30,7 @@ def _gallery_items() -> list[dict]:
         raw = json.loads(GALLERY_PATH.read_text(encoding="utf-8"))
     except Exception:
         raw = []
-    return raw if isinstance(raw, list) and raw else _fallback_items()
+    return raw if isinstance(raw, list) and raw else _default_items()
 
 
 def _render_card(item: dict, index: int) -> str:
@@ -65,7 +65,7 @@ def _is_inside_workspace(path: Path) -> bool:
         return False
 
 
-def _fallback_items() -> list[dict]:
+def _default_items() -> list[dict]:
     return [
         {
             "title": "A Small Relief",

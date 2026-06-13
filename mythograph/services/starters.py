@@ -1,33 +1,9 @@
 import time
-import random
 
 from mythograph.config import LLM_CHAT_MAX_TOKENS, ROOT_DIR
 from mythograph.models.llm_client import LLMClient, extract_json_object
 from mythograph.schemas.ui import ConversationStarter, ConversationStarters
 from mythograph.services.trace_logger import log_event
-from mythograph.ui.examples import STARTER_IDEAS
-
-
-FALLBACK_STARTERS = [
-    ConversationStarter(title=title, text=text)
-    for title, text in [
-        ("A small shift", "I noticed I am different in a way I cannot explain yet."),
-        ("An ordinary object", "There is a cup on my desk that somehow feels like this whole month."),
-        ("Almost ready", "I want something about being close to changing, but not there yet."),
-        ("A quiet win", "I did one small thing right, and I want to remember that it counts."),
-        ("A sentence", "I keep thinking about how a place can be gone and still feel nearby."),
-        ("Weather inside", "Today feels bright at the edges and heavy in the middle."),
-        ("After noise", "I want something about the silence after too many opinions."),
-        ("A private hope", "There is something I am hoping for, but I do not want to say it too loudly."),
-        ("Two truths", "I feel grateful and restless at the same time."),
-        ("Small courage", "I want something about trying again without making a big speech about it."),
-    ]
-]
-
-
-def fallback_starters(count: int = 6) -> list[ConversationStarter]:
-    starters = FALLBACK_STARTERS or [ConversationStarter(title=title, text=text) for title, text in STARTER_IDEAS]
-    return random.sample(starters, k=min(count, len(starters)))
 
 
 def generate_conversation_starters(client: LLMClient | None = None, count: int = 6) -> list[ConversationStarter]:
@@ -49,7 +25,6 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
             "heavy art jargon",
             "generic inspirational quotes",
             "overly poetic abstractions",
-            "reusing the fallback examples",
         ],
     }
     started = time.perf_counter()
@@ -59,12 +34,9 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
         max_tokens=max(LLM_CHAT_MAX_TOKENS, 220),
         response_format={"type": "json_object"},
     )
-    if response.source == "mock":
-        return fallback_starters(count)
-
     current_response = response
     last_error = response.error or ""
-    max_attempts = 4
+    max_attempts = 3
     for attempt in range(max_attempts):
         try:
             if current_response.error:
@@ -73,7 +45,6 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
         except Exception as exc:
             last_error = str(exc)
             if attempt >= max_attempts - 1:
-                starters = fallback_starters(count)
                 log_event(
                     "llm_conversation_starters",
                     {
@@ -81,13 +52,11 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
                         "elapsed_seconds": round(time.perf_counter() - started, 3),
                         "error": last_error,
                         "transport_error": current_response.error,
-                        "used_fallback": True,
                         "retry_count": attempt,
                         "raw_content": current_response.content or response.content,
-                        "starters": [starter.model_dump() for starter in starters],
                     },
                 )
-                return starters
+                raise RuntimeError(f"Starter generation failed after retries: {last_error}") from exc
             current_response = llm.complete_json(
                 _repair_starters_prompt(),
                 {
@@ -95,7 +64,6 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
                     "previous_error": last_error,
                     "attempt": attempt + 1,
                     "required_shape": {"starters": [{"title": "string", "text": "string"}]},
-                    "fallback_examples": [starter.model_dump() for starter in fallback_starters(count)],
                 },
                 max_tokens=max(LLM_CHAT_MAX_TOKENS, 220),
                 response_format={"type": "json_object"},
@@ -108,14 +76,13 @@ def generate_conversation_starters(client: LLMClient | None = None, count: int =
                 "source": current_response.source,
                 "elapsed_seconds": round(time.perf_counter() - started, 3),
                 "transport_error": current_response.error,
-                "used_fallback": False,
                 "retry_count": attempt,
                 "raw_content": current_response.content,
                 "starters": [starter.model_dump() for starter in starters],
             },
         )
         return starters
-    return fallback_starters(count)
+    raise RuntimeError(f"Starter generation failed after retries: {last_error}")
 
 
 def _repair_starters_prompt() -> str:
@@ -142,11 +109,6 @@ def _normalize_starters(payload: dict, count: int) -> list[ConversationStarter]:
         starters.append(ConversationStarter(title=title, text=text))
         if len(starters) >= count:
             break
-    for starter in fallback_starters(count):
-        if len(starters) >= count:
-            break
-        if starter.text.lower() not in seen:
-            starters.append(starter)
     return starters[:count]
 
 

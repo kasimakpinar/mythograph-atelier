@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 
 from mythograph.config import IMAGE_MODE
 from mythograph.config import (
@@ -20,9 +21,16 @@ from mythograph.config import (
 )
 from mythograph.config import OUTPUT_DIR
 from mythograph.schemas.art_recipe import ArtRecipe
-from mythograph.services.generation import ImageGenerationResult, generate_fallback_image
 from mythograph.services.image_prompting import build_flux_prompt
 from mythograph.services.trace_logger import log_event
+
+
+@dataclass
+class ImageGenerationResult:
+    path: str
+    source: str
+    elapsed_seconds: float
+    error: str | None = None
 
 
 class ImageClient:
@@ -33,68 +41,57 @@ class ImageClient:
         self.mode = mode
 
     def generate(self, recipe: ArtRecipe) -> ImageGenerationResult:
-        if self.mode in {"pillow", "mock", "fallback"}:
-            return generate_fallback_image(recipe)
         if self.mode in {"flux", "flux_klein", "diffusers"}:
             return self._generate_flux(recipe)
-
-        fallback = generate_fallback_image(recipe)
-        fallback.source = "pillow_fallback"
-        fallback.error = f"Image mode '{self.mode}' is not implemented yet."
-        return fallback
+        raise RuntimeError(f"Image mode '{self.mode}' is not available. Use MYTHOGRAPH_IMAGE_MODE=flux.")
 
     def _generate_flux(self, recipe: ArtRecipe) -> ImageGenerationResult:
         started = time.perf_counter()
+        pipe = self._load_flux_pipeline()
+        internal_prompt = build_flux_prompt(
+            recipe.image_prompt,
+            use_lora=USE_FT_IMAGE_MODEL,
+            prepend_trigger=FT_IMAGE_MODEL_PREPEND_TRIGGER,
+            trigger=FT_IMAGE_MODEL_TRIGGER,
+        )
+        log_event(
+            "flux_generation_config",
+            {
+                "use_ft_image_model": USE_FT_IMAGE_MODEL,
+                "prepend_trigger": FT_IMAGE_MODEL_PREPEND_TRIGGER,
+                "trigger": FT_IMAGE_MODEL_TRIGGER,
+                "ft_image_model_repo": FT_IMAGE_MODEL_REPO,
+                "ft_image_model_path": FT_IMAGE_MODEL_PATH,
+                "ft_image_model_weight_name": FT_IMAGE_MODEL_WEIGHT_NAME,
+                "ft_image_model_scale": FT_IMAGE_MODEL_SCALE,
+                "model_id": IMAGE_MODEL_ID,
+            },
+        )
+        image_kwargs = {
+            "prompt": internal_prompt,
+            "guidance_scale": IMAGE_GUIDANCE_SCALE,
+            "num_inference_steps": IMAGE_STEPS,
+            "width": IMAGE_WIDTH,
+            "height": IMAGE_HEIGHT,
+        }
+        negative_prompt = recipe.negative_prompt
         try:
-            pipe = self._load_flux_pipeline()
-            internal_prompt = build_flux_prompt(
-                recipe.image_prompt,
-                use_lora=USE_FT_IMAGE_MODEL,
-                prepend_trigger=FT_IMAGE_MODEL_PREPEND_TRIGGER,
-                trigger=FT_IMAGE_MODEL_TRIGGER,
-            )
-            log_event(
-                "flux_generation_config",
-                {
-                    "use_ft_image_model": USE_FT_IMAGE_MODEL,
-                    "prepend_trigger": FT_IMAGE_MODEL_PREPEND_TRIGGER,
-                    "trigger": FT_IMAGE_MODEL_TRIGGER,
-                    "ft_image_model_repo": FT_IMAGE_MODEL_REPO,
-                    "ft_image_model_path": FT_IMAGE_MODEL_PATH,
-                    "ft_image_model_weight_name": FT_IMAGE_MODEL_WEIGHT_NAME,
-                    "ft_image_model_scale": FT_IMAGE_MODEL_SCALE,
-                    "model_id": IMAGE_MODEL_ID,
-                },
-            )
-            image_kwargs = {
-                "prompt": internal_prompt,
-                "guidance_scale": IMAGE_GUIDANCE_SCALE,
-                "num_inference_steps": IMAGE_STEPS,
-                "width": IMAGE_WIDTH,
-                "height": IMAGE_HEIGHT,
-            }
-            negative_prompt = recipe.negative_prompt
-            try:
-                import torch
+            import torch
 
-                if IMAGE_SEED > 0:
-                    image_kwargs["generator"] = torch.Generator(device="cuda").manual_seed(IMAGE_SEED)
-            except Exception:
-                pass
+            if IMAGE_SEED > 0:
+                image_kwargs["generator"] = torch.Generator(device="cuda").manual_seed(IMAGE_SEED)
+        except Exception:
+            pass
 
-            image = self._run_flux_pipeline(pipe, image_kwargs, negative_prompt).images[0]
-            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            path = OUTPUT_DIR / f"flux_{abs(hash(recipe.image_prompt)) % 10_000_000}.png"
-            image.save(path)
-            return ImageGenerationResult(
-                path=str(path),
-                source="flux_klein",
-                elapsed_seconds=round(time.perf_counter() - started, 3),
-            )
-        except Exception as exc:
-            fallback = generate_fallback_image(recipe)
-            fallback.error = f"FLUX backend failed: {exc}"
-            return fallback
+        image = self._run_flux_pipeline(pipe, image_kwargs, negative_prompt).images[0]
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        path = OUTPUT_DIR / f"flux_{abs(hash(recipe.image_prompt)) % 10_000_000}.png"
+        image.save(path)
+        return ImageGenerationResult(
+            path=str(path),
+            source="flux_klein",
+            elapsed_seconds=round(time.perf_counter() - started, 3),
+        )
 
     @classmethod
     def _load_flux_pipeline(cls):

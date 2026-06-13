@@ -15,14 +15,14 @@ short_description: AI abstract art with personal meaning
 
 Abstract art with a meaning you can explain.
 
-Mythograph Atelier is a Gradio app for Hugging Face's Build Small Hackathon. It creates an abstract painting backwards: first a small local text model asks short adaptive questions and chooses safe UI controls, then FLUX.2 Klein renders a landscape abstract artwork with a title, symbol map, and short explanation.
+Mythograph Atelier is a Gradio app for Hugging Face's Build Small Hackathon. It creates an abstract painting backwards: first a small local text model has a short chat about the meaning, then FLUX.2 Klein renders an abstract artwork with a title, symbol map, and short explanation.
 
 ## Current MVP
 
 - Chat-first dynamic interview with AI-refreshable starter chips, assistant messages, and controls that appear only when needed.
 - No external inference APIs: `llama.cpp` runs the text model on ZeroGPU, and FLUX.2 Klein runs afterward on ZeroGPU for image generation.
 - Dynamic control tray for choice cards, multi-choice cards, visual sliders, palette mood, text refinement, and create readiness.
-- FLUX.2 Klein image generation with Pillow as a reliable fallback.
+- FLUX.2 Klein image generation. Model errors are surfaced in the UI instead of being replaced with scripted output.
 - JSONL trace logging for conversation turns, control responses, model calls, image generation, and demo sessions.
 - Custom Gradio shell designed for the Off-Brand badge path.
 
@@ -35,12 +35,6 @@ Mythograph Atelier is a Gradio app for Hugging Face's Build Small Hackathon. It 
 - **Llama Champion:** Text inference runs through `llama.cpp`.
 
 ## Run Locally
-
-For quick UI testing without model download:
-
-```bash
-MYTHOGRAPH_LLM_MODE=mock python app.py
-```
 
 For the no-API llama.cpp path:
 
@@ -61,15 +55,12 @@ MYTHOGRAPH_LLAMACPP_N_CTX=2048
 MYTHOGRAPH_LLAMACPP_N_GPU_LAYERS=-1
 MYTHOGRAPH_LLAMACPP_N_THREADS=2
 MYTHOGRAPH_LLAMACPP_PRELOAD=0
-MYTHOGRAPH_LLAMACPP_CHAT_ENABLED=1
-MYTHOGRAPH_LLAMACPP_RECIPE_ENABLED=1
 MYTHOGRAPH_LLAMACPP_RECIPE_THINKING=1
 MYTHOGRAPH_LLAMACPP_UNLOAD_AFTER_CALL=0
 MYTHOGRAPH_LLAMACPP_FLASH_ATTN=0
 MYTHOGRAPH_LLM_CHAT_MAX_TOKENS=420
 MYTHOGRAPH_LLM_RECIPE_MAX_TOKENS=1200
 MYTHOGRAPH_LLM_TEMPERATURE=0.55
-MYTHOGRAPH_CONVERSATION_MODE=model_assisted
 MYTHOGRAPH_IMAGE_MODE=flux
 MYTHOGRAPH_IMAGE_MODEL_ID=black-forest-labs/FLUX.2-klein-4B
 MYTHOGRAPH_IMAGE_WIDTH=1024
@@ -117,7 +108,7 @@ Llama.from_pretrained(
 )
 ```
 
-The model-assisted conversation director receives a compact atelier state, not the full chat transcript. It returns one safe JSON `ConversationTurn`; Python validates the component kind, options, sliders, and readiness before updating the UI.
+Each conversation turn sends the recent chat history plus compact atelier state to the text model. The model returns one JSON `ConversationTurn`; Python validates the schema and retries malformed responses before surfacing an error.
 
 Image:
 
@@ -128,7 +119,7 @@ FLUX.2 Klein 4B
 ZeroGPU after llama.cpp unload
 ```
 
-If FLUX fails to load or generate, the app falls back to Pillow and records the failure in the trace.
+If FLUX fails to load or generate, the app reports the error in the UI and records it in the trace.
 
 ## Trace Proof
 
@@ -136,9 +127,7 @@ For a successful no-API GPU run, the downloaded trace should show:
 
 ```text
 llm_conversation_turn.source = llamacpp
-llm_conversation_turn.used_fallback = false
 llm_art_recipe.source = llamacpp
-llm_art_recipe.used_fallback = false
 image_generation.source = flux_klein
 ```
 

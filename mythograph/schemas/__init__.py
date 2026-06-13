@@ -6,9 +6,7 @@ from mythograph.schemas.ui import (
     ControlResponse,
     ConversationTurn,
     DynamicControl,
-    NextUI,
     SliderSpec,
-    UIAction,
 )
 
 __all__ = [
@@ -18,10 +16,8 @@ __all__ = [
     "ConversationTurn",
     "DynamicControl",
     "InterviewProfile",
-    "NextUI",
     "ObjectiveScores",
     "SliderSpec",
     "Symbol",
     "TraceEvent",
-    "UIAction",
 ]

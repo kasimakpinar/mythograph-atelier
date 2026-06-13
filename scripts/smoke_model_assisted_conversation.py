@@ -11,43 +11,45 @@ import mythograph.services.conversation as conversation
 
 class GoodClient:
     def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        assert max_tokens == max(conversation.LLM_CHAT_MAX_TOKENS, 180)
         assert response_format == {"type": "json_object"}
-        assert thinking is False
-        if "invalid_json" in user_payload:
-            return LLMResponse(content=user_payload["invalid_json"], source="llamacpp")
-        assert "atelier_state" in user_payload
         assert "conversation_history" in user_payload
-        assert user_payload["task"] == "conversation_with_ui"
-        assert "fallback_turn" not in user_payload
-        assert "available_option_sets" not in user_payload
-        assert "next_need" in user_payload
-        assert "can_generate" in user_payload
-        assert "preferred_control_kind" in user_payload["next_need"]
-        assert "goal" in user_payload["next_need"]
-        assert "suggested_component" not in user_payload["next_need"]
-        assert "choice_cards" in user_payload["allowed_control_kinds"]
-        assert "text_refinement" in user_payload["allowed_control_kinds"]
-        assert "swatch_picker" in user_payload["allowed_control_kinds"]
-        if user_payload["can_generate"]:
-            assert "ready_button" in user_payload["allowed_control_kinds"]
-        else:
-            assert "ready_button" not in user_payload["allowed_control_kinds"]
-        assert user_payload["controls_are_optional"] is True
-        assert len(user_payload["atelier_state"]["answers_so_far"]) <= 6
+        assert "atelier_state" in user_payload
+        assert set(user_payload).issuperset({"task", "conversation_history", "atelier_state", "can_generate"})
         return LLMResponse(
             content=json.dumps(
                 {
-                    "assistant_message": "Patience can mean endurance, trust, or refusing to be hurried. Which reading feels closest?",
-                    "progress_label": "Meaning: interpretation",
-                    "reason": "fake model proposed a meaning control",
+                    "assistant_message": "That sounds like care under pressure. What should the painting understand about that pressure?",
+                    "progress_label": "Listening",
+                    "reason": "the model chose a natural follow-up",
+                    "is_ready": False,
+                    "controls": [],
+                }
+            ),
+            source="llamacpp",
+        )
+
+
+class RepairClient:
+    def __init__(self):
+        self.calls = 0
+
+    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(content="not json", source="llamacpp")
+        return LLMResponse(
+            content=json.dumps(
+                {
+                    "assistant_message": "I can use that. Which phrase feels closest to the center?",
+                    "progress_label": "Listening",
+                    "reason": "repair returned valid JSON",
                     "is_ready": False,
                     "controls": [
                         {
                             "kind": "choice_cards",
-                            "label": "Interpretation",
-                            "prompt": "Pick the closest reading.",
-                            "options": ["quiet endurance", "trusting the slow path", "refusing to be hurried"],
+                            "label": "Center",
+                            "prompt": "Pick the closest phrase.",
+                            "options": ["care under pressure", "guilt without surrender", "resistance as tenderness"],
                             "sliders": [],
                         }
                     ],
@@ -62,315 +64,34 @@ class BadClient:
         return LLMResponse(content="not json", source="llamacpp")
 
 
-class RepairClient:
-    def __init__(self):
-        self.calls = 0
-
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        self.calls += 1
-        if self.calls == 1:
-            return LLMResponse(content="not json", source="llamacpp")
-        return LLMResponse(
-            content=json.dumps(
-                {
-                    "assistant_message": "Let us make the meaning less decorative. Which inner stance should patience carry here?",
-                    "progress_label": "Meaning: repaired",
-                    "reason": "repair produced valid UI JSON",
-                    "is_ready": False,
-                    "controls": [
-                        {
-                            "kind": "choice_cards",
-                            "label": "Inner stance",
-                            "prompt": "Pick one stance.",
-                            "options": ["acceptance without surrender", "strength without noise", "patience as chosen restraint"],
-                            "sliders": [],
-                        }
-                    ],
-                }
-            ),
-            source="llamacpp",
-        )
-
-
-class FreeControlClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        return LLMResponse(
-            content=json.dumps(
-                {
-                    "assistant_message": "I want to hear this in your words before I turn it into marks. What does patience protect?",
-                    "progress_label": "Listening: personal meaning",
-                    "reason": "free text can deepen the profile",
-                    "is_ready": False,
-                    "controls": [
-                        {
-                            "kind": "text_refinement",
-                            "label": "Your words",
-                            "prompt": "Write one small sentence.",
-                            "options": [],
-                            "sliders": [],
-                        }
-                    ],
-                }
-            ),
-            source="llamacpp",
-        )
-
-
-class LooseSliderClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        return LLMResponse(
-            content=json.dumps(
-                {
-                    "assistant_message": "What pulse?",
-                    "progress_label": "mood",
-                    "reason": "intensity",
-                    "is_ready": False,
-                    "controls": [
-                        {
-                            "kind": "slider_group",
-                            "label": "pulse",
-                            "left_label": "bare",
-                            "right_label": "vibrant",
-                            "value": 50,
-                            "sliders": ["density", "intensity", "range"],
-                        }
-                    ],
-                }
-            ),
-            source="llamacpp",
-        )
-
-
-class RepetitiveThenGoodClient:
-    def __init__(self):
-        self.calls = 0
-
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        self.calls += 1
-        if self.calls == 1:
-            return LLMResponse(
-                content=json.dumps(
-                    {
-                        "assistant_message": "Which detail makes this feeling yours?",
-                        "progress_label": "Looping",
-                        "reason": "repeats a robotic question",
-                        "is_ready": False,
-                        "controls": [
-                            {
-                                "kind": "choice_cards",
-                                "label": "Detail",
-                                "prompt": "Which detail makes this feeling yours?",
-                                "options": ["yours"],
-                                "sliders": [],
-                            }
-                        ],
-                    }
-                ),
-                source="llamacpp",
-            )
-        return LLMResponse(
-            content=json.dumps(
-                {
-                    "assistant_message": "Patience can be passive, but it can also be a decision not to let urgency own you. Which version should this piece understand?",
-                    "progress_label": "Meaning: fresh retry",
-                    "reason": "retry moved to a clearer meaning question",
-                    "is_ready": False,
-                    "controls": [
-                        {
-                            "kind": "choice_cards",
-                            "label": "Meaning",
-                            "prompt": "Pick the closest version.",
-                            "options": ["quiet refusal", "trust in slow change", "discipline without hardness"],
-                            "sliders": [],
-                        }
-                    ],
-                }
-            ),
-            source="llamacpp",
-        )
-
-
-class ChatOnlyClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        assert user_payload["task"] == "conversation_chat"
-        assert user_payload["allowed_control_kinds"] == []
-        return LLMResponse(
-            content=json.dumps(
-                {
-                    "assistant_message": "That sounds less like a style choice and more like a private test of patience. What part of waiting feels hardest here?",
-                    "progress_label": "Listening: meaning",
-                    "reason": "the user's own words will be more useful than a control here",
-                    "is_ready": False,
-                    "controls": [],
-                }
-            ),
-            source="llamacpp",
-        )
-
-
-class AlwaysRepeatsTraceQuestionClient:
-    def __init__(self):
-        self.calls = 0
-
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        self.calls += 1
-        return LLMResponse(
-            content=json.dumps(
-                {
-                    "assistant_message": (
-                        "That contradiction already has a lot of weight in it - it sounds less like a simple "
-                        "choice and more like a pull between two truths. What feels most true to you here: "
-                        "that this is a real tension in your life, or that you're trying to hold both sides at once?"
-                    ),
-                    "progress_label": "Getting the meaning straight",
-                    "reason": "repeats the trace question with light paraphrasing",
-                    "is_ready": False,
-                    "controls": [
-                        {
-                            "kind": "choice_cards",
-                            "label": "What feels most true?",
-                            "prompt": "Pick the reading that fits best, or tell me in your own words.",
-                            "options": [
-                                "It is a real tension in my life",
-                                "I am trying to hold both sides at once",
-                                "It is more about freedom than loneliness",
-                            ],
-                            "sliders": [],
-                        }
-                    ],
-                }
-            ),
-            source="llamacpp",
-        )
-
-
-class ShouldNotBeCalledClient:
-    def complete_json(self, system_prompt, user_payload, max_tokens=None, temperature=None, response_format=None, thinking=False):
-        raise AssertionError("generation intent should bypass the model director")
+def _profile():
+    profile = conversation.new_profile()
+    profile.ideas.append("I want something about caring and guilt.")
+    profile.free_notes.append("Both can be true.")
+    profile.turn_count = 2
+    return conversation.update_scores(profile)
 
 
 def main() -> None:
-    original_mode = conversation.CONVERSATION_MODE
-    conversation.CONVERSATION_MODE = "model_assisted"
-    try:
-        profile = conversation.new_profile()
-        profile.ideas.append("I want something about patience.")
-        profile.free_notes.append("quiet pressure")
-        profile.free_notes.append("hidden order")
-        profile.turn_count = 3
-        profile.visual_preferences.update({"minimal_rich": 35, "calm_intense": 45, "geometric_organic": 45})
-        profile = conversation.update_scores(profile)
-        fallback = conversation.choose_conversation_turn(profile)
+    history = [
+        {"role": "user", "content": "I want something about caring and guilt."},
+        {"role": "assistant", "content": "Tell me more."},
+        {"role": "user", "content": "Both can be true."},
+    ]
 
-        good = conversation.choose_conversation_turn_with_model(profile, fallback, GoodClient())
-        assert good.controls[0].kind == ControlKind.CHOICE_CARDS
-        assert good.controls[0].options[0] == "quiet endurance"
+    good = conversation.choose_conversation_turn_with_model(_profile(), GoodClient(), history)
+    assert good.controls == []
+    assert "care under pressure" in good.assistant_message
 
-        repaired = conversation.choose_conversation_turn_with_model(profile, fallback, RepairClient())
-        assert repaired.controls[0].kind == ControlKind.CHOICE_CARDS
-        assert repaired.controls[0].options[0] == "acceptance without surrender"
+    repair_client = RepairClient()
+    repaired = conversation.choose_conversation_turn_with_model(_profile(), repair_client, history)
+    assert repair_client.calls == 2
+    assert repaired.controls[0].kind == ControlKind.CHOICE_CARDS
 
-        free_control = conversation.choose_conversation_turn_with_model(profile, fallback, FreeControlClient())
-        assert free_control.controls[0].kind == ControlKind.TEXT_REFINEMENT
-        assert free_control.progress_label == "Listening: personal meaning"
-
-        chat_profile = conversation.new_profile()
-        chat_profile.ideas.append("I want something about patience.")
-        chat_profile.turn_count = 1
-        chat_profile = conversation.update_scores(chat_profile)
-        chat_only = conversation.choose_conversation_turn_with_model(
-            chat_profile,
-            conversation.choose_conversation_turn(chat_profile),
-            ChatOnlyClient(),
-        )
-        assert chat_only.controls == []
-        assert "waiting feels hardest" in chat_only.assistant_message
-
-        slider_profile = conversation.new_profile()
-        slider_profile.ideas.extend(["I want something about being positive", "sharp"])
-        slider_profile.free_notes.append("pulse")
-        slider_profile.turn_count = 3
-        slider_profile = conversation.update_scores(slider_profile)
-        slider_fallback = conversation.choose_conversation_turn(slider_profile)
-        loose_slider = conversation.choose_conversation_turn_with_model(slider_profile, slider_fallback, LooseSliderClient())
-        assert loose_slider.controls[0].kind == ControlKind.SLIDER_GROUP
-        assert loose_slider.controls[0].prompt == "pulse"
-        assert loose_slider.controls[0].sliders[0].key == "density"
-
-        repetitive_client = RepetitiveThenGoodClient()
-        fresh = conversation.choose_conversation_turn_with_model(profile, fallback, repetitive_client)
-        assert repetitive_client.calls == 2
-        assert fresh.controls[0].kind == ControlKind.CHOICE_CARDS
-        assert fresh.controls[0].options[0] == "quiet refusal"
-
-        bad = conversation.choose_conversation_turn_with_model(profile, fallback, BadClient())
-        assert not bad.is_ready
-        assert bad.controls == []
-        assert "could not produce a valid next step" in bad.assistant_message
-
-        stance_profile = conversation.new_profile()
-        stance_profile.ideas.append("I want something about the calmness in the chaos")
-        stance_profile = conversation.update_scores(stance_profile)
-        conversation.apply_control_response(
-            stance_profile,
-            conversation.ControlResponse(
-                kind=ControlKind.CHOICE_CARDS,
-                values=["It should feel accepting, like the system is fair and the chaos is part of it."],
-                label="What stance should it take toward this idea?",
-                prompt="Pick the reading that fits best.",
-            ),
-        )
-        assert stance_profile.contrasts
-        assert not stance_profile.styles
-
-        trace_profile = conversation.new_profile()
-        trace_profile.ideas.append("I feel free, but also strangely lonely.")
-        trace_profile.free_notes.extend(
-            [
-                "There is a trade-off between being free and lonely.",
-                "Sometimes I want lunch alone, but then miss being with friends.",
-            ]
-        )
-        trace_profile.contrasts.append("It is a contradiction I am trying to live with")
-        trace_profile.asked_questions.append(
-            "That contradiction already has a lot of weight in it: freedom and loneliness can sit together, "
-            "but they do not always want to. What feels most true to you here - that this is a real tension "
-            "in your life, or that you are trying to hold both sides at once?"
-        )
-        trace_profile.turn_count = 4
-        trace_profile = conversation.update_scores(trace_profile)
-        assert trace_profile.scores.ready_to_generate
-        repeating_client = AlwaysRepeatsTraceQuestionClient()
-        trace_fallback = conversation.choose_conversation_turn_with_model(
-            trace_profile,
-            conversation.choose_conversation_turn(trace_profile),
-            repeating_client,
-        )
-        assert repeating_client.calls == 4
-        assert not trace_fallback.is_ready
-        assert trace_fallback.controls == []
-        assert "could not produce a valid next step" in trace_fallback.assistant_message
-
-        intent_profile = conversation.new_profile()
-        intent_profile.ideas.append("I feel free, but also strangely lonely.")
-        intent_profile.free_notes.extend(
-            [
-                "There is a trade-off between being free and lonely.",
-                "Lunch alone versus lunch with colleagues is the everyday example.",
-            ]
-        )
-        intent_profile.contrasts.append("I am trying to hold both sides at once")
-        intent_profile.turn_count = 4
-        intent_profile = conversation.update_scores(intent_profile)
-        intent_profile, intent_turn = conversation.advance_conversation(
-            intent_profile,
-            user_message="Create image",
-            client=ShouldNotBeCalledClient(),
-        )
-        assert intent_turn.is_ready
-        assert intent_turn.controls[0].kind == ControlKind.READY_BUTTON
-    finally:
-        conversation.CONVERSATION_MODE = original_mode
+    bad = conversation.choose_conversation_turn_with_model(_profile(), BadClient(), history)
+    assert bad.controls == []
+    assert not bad.is_ready
+    assert "could not produce a valid next step" in bad.assistant_message
 
     print("model_assisted_ok")
 
