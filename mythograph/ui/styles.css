@@ -109,6 +109,10 @@ footer,
   overflow-x: hidden;
 }
 
+#ma-start-panel > .wrap > * {
+  animation: maFadeUp 260ms ease both;
+}
+
 .ma-start {
   max-width: 880px;
   margin: 0 auto 22px;
@@ -170,10 +174,10 @@ footer,
 #ma-control-tray textarea,
 #ma-control-tray input[type="text"] {
   border-radius: var(--ma-radius-pill) !important;
-  background: rgba(255, 248, 235, 0.1) !important;
+  background: rgba(8, 6, 17, 0.74) !important;
   color: var(--ma-text) !important;
-  border: 1px solid var(--ma-border) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 248, 235, 0.24) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 36px rgba(0, 0, 0, 0.24) !important;
 }
 
 #ma-start-input textarea::placeholder,
@@ -361,7 +365,7 @@ button.ma-rotating-starter:hover {
   margin: 18px auto;
   border: 1px solid var(--ma-border);
   border-radius: var(--ma-radius);
-  background: rgba(255, 248, 235, 0.075);
+  background: rgba(8, 6, 17, 0.78);
   color: var(--ma-text);
   box-shadow: var(--ma-shadow);
   overflow: hidden;
@@ -414,6 +418,10 @@ button.ma-rotating-starter:hover {
   flex-direction: column;
   justify-content: center;
   min-width: 0;
+  padding: 16px;
+  border-radius: var(--ma-radius);
+  background: linear-gradient(135deg, rgba(8, 6, 17, 0.84), rgba(18, 13, 31, 0.72));
+  border: 1px solid rgba(255, 248, 235, 0.1);
 }
 
 .ma-story-kicker {
@@ -430,7 +438,7 @@ button.ma-rotating-starter:hover {
 
 .ma-story-copy p {
   margin: 0;
-  color: var(--ma-muted);
+  color: #e6dac9;
   line-height: 1.55;
 }
 
@@ -454,6 +462,17 @@ button.ma-rotating-starter:hover {
   50%, 70% { transform: translateX(-50%); }
   75%, 95% { transform: translateX(-75%); }
   100% { transform: translateX(0); }
+}
+
+@keyframes maFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 #ma-control-tray {
@@ -624,10 +643,22 @@ button.ma-rotating-starter:hover {
   backdrop-filter: blur(20px);
 }
 
+#ma-input-dock,
+#ma-input-dock > *,
+#ma-input-dock .form,
+#ma-input-dock .wrap,
+#ma-input-dock .block {
+  min-height: 0 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
 #ma-input-dock textarea,
 #ma-input-dock input {
   min-height: 54px !important;
   padding: 0 20px !important;
+  opacity: 1 !important;
+  caret-color: var(--ma-gold-light) !important;
 }
 
 .ma-send button,

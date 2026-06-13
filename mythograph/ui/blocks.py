@@ -10,7 +10,6 @@ from mythograph.schemas.profile import InterviewProfile
 from mythograph.schemas.ui import ConversationStarter, ControlKind, ControlResponse, ConversationTurn
 from mythograph.services.art_recipe import build_art_recipe_with_model
 from mythograph.services.conversation import advance_conversation, model_error_turn, new_profile, start_session
-from mythograph.services.starters import generate_conversation_starters
 from mythograph.services.trace_logger import export_trace, log_event
 from mythograph.ui.examples import REGENERATION_OPTIONS
 from mythograph.ui.waiting_gallery import render_waiting_gallery
@@ -18,6 +17,14 @@ from mythograph.ui.waiting_gallery import render_waiting_gallery
 
 STARTER_LOADING_LABEL = "The atelier is opening..."
 STARTER_COUNT = 3
+STARTER_LIBRARY = [
+    ConversationStarter(title="Small relief", text="I want something about finally breathing easier."),
+    ConversationStarter(title="Spring joy", text="The joy of spring after a long winter."),
+    ConversationStarter(title="Missing home", text="I miss home, but I am also proud that I left."),
+    ConversationStarter(title="Clean room", text="I want it to feel like a clean room after a hard week."),
+    ConversationStarter(title="Quiet ambition", text="Something about ambition that does not need to shout."),
+    ConversationStarter(title="Slow courage", text="I want a piece about becoming brave slowly."),
+]
 
 
 def build_demo() -> gr.Blocks:
@@ -45,7 +52,7 @@ def build_demo() -> gr.Blocks:
         regenerate_action_state = gr.State("regenerate")
 
         with gr.Group(elem_id="ma-start-panel") as start_panel:
-            gr.HTML(
+            start_intro = gr.HTML(
                 """
                 <section class="ma-start">
                   <div class="ma-kicker">Mythograph Atelier</div>
@@ -53,6 +60,7 @@ def build_demo() -> gr.Blocks:
                   <p>The atelier will ask only what it needs, then turn your answers into abstract art with a story you can say out loud.</p>
                 </section>
                 """,
+                visible=False,
                 container=False,
             )
             start_prompt = gr.Textbox(
@@ -62,8 +70,9 @@ def build_demo() -> gr.Blocks:
                 max_lines=1,
                 elem_id="ma-start-input",
                 show_label=False,
+                visible=False,
             )
-            with gr.Row(elem_classes=["ma-start-actions"]):
+            with gr.Row(visible=False, elem_classes=["ma-start-actions"]) as start_actions:
                 start_submit = gr.Button("Begin", variant="primary", elem_classes=["ma-send"])
                 refresh_starters = gr.Button("Refresh examples", elem_classes=["ma-ghost"])
                 reset_from_start = gr.Button("Reset", elem_classes=["ma-ghost"])
@@ -73,14 +82,14 @@ def build_demo() -> gr.Blocks:
                 elem_classes=["ma-start-waiting"],
                 container=False,
             )
-            with gr.Row(elem_classes=["ma-starters"]):
+            with gr.Row(visible=False, elem_classes=["ma-starters"]) as starters_row:
                 starter_button = gr.Button(
                     STARTER_LOADING_LABEL,
                     elem_classes=["ma-chip", "ma-rotating-starter"],
                     size="sm",
                     interactive=False,
                 )
-                starter_timer = gr.Timer(value=4, active=True)
+                starter_timer = gr.Timer(value=4, active=False)
 
         with gr.Group(visible=False, elem_id="ma-chat-panel") as chat_panel:
             with gr.Row(elem_classes=["ma-topbar"]):
@@ -253,22 +262,47 @@ def build_demo() -> gr.Blocks:
             outputs=flow_outputs,
         )
 
-        starter_button.click(
-            fn=_submit_starter,
+        starter_event = starter_button.click(
+            fn=_select_starter,
             inputs=[profile_state, chat_history_state, starter_state, starter_index_state],
+            outputs=flow_outputs,
+            show_progress="hidden",
+            queue=False,
+        )
+        starter_event.then(
+            fn=_continue_latest_user_message,
+            inputs=[profile_state, chat_history_state],
             outputs=flow_outputs,
         )
 
         refresh_starters.click(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
+            outputs=[
+                starter_state,
+                starter_index_state,
+                starter_button,
+                start_waiting_gallery,
+                start_intro,
+                start_prompt,
+                start_actions,
+                starters_row,
+            ],
         )
 
         demo.load(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
+            outputs=[
+                starter_state,
+                starter_index_state,
+                starter_button,
+                start_waiting_gallery,
+                start_intro,
+                start_prompt,
+                start_actions,
+                starters_row,
+            ],
             show_progress="hidden",
         )
         starter_timer.tick(
@@ -323,13 +357,31 @@ def build_demo() -> gr.Blocks:
         reset_button.click(fn=_reset, outputs=flow_outputs).then(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
+            outputs=[
+                starter_state,
+                starter_index_state,
+                starter_button,
+                start_waiting_gallery,
+                start_intro,
+                start_prompt,
+                start_actions,
+                starters_row,
+            ],
             show_progress="hidden",
         )
         reset_from_start.click(fn=_reset, outputs=flow_outputs).then(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
+            outputs=[
+                starter_state,
+                starter_index_state,
+                starter_button,
+                start_waiting_gallery,
+                start_intro,
+                start_prompt,
+                start_actions,
+                starters_row,
+            ],
             show_progress="hidden",
         )
 
@@ -437,20 +489,69 @@ def _submit_starter(profile_data: dict, history: list[dict], starters_data: list
     yield from _stream_assistant_message(profile, director_history, turn)
 
 
-@spaces.GPU(duration=60)
+def _select_starter(profile_data: dict, history: list[dict], starters_data: list[dict], index: int):
+    starters = _starter_models(starters_data)
+    if not starters:
+        return _reset()
+    starter = starters[index % len(starters)]
+    director_history = (history or []) + [_message("user", starter.text)]
+    return _render(
+        _profile(profile_data),
+        director_history,
+        ConversationTurn(
+            assistant_message="The art director is thinking...",
+            progress_label="The art director is thinking...",
+            reason="starter selected",
+            is_ready=False,
+        ),
+        activity="Text model thinking...\nThe art director is choosing the next question and creative control.",
+    )
+
+
+def _continue_latest_user_message(profile_data: dict, history: list[dict]):
+    user_message = ""
+    for message in reversed(history or []):
+        if message.get("role") == "user":
+            user_message = message.get("content", "")
+            break
+    if not user_message:
+        yield _reset()
+        return
+    profile_data, turn_data = _advance_conversation_on_gpu(profile_data, user_message, None, history)
+    profile = _profile(profile_data)
+    turn = _turn(turn_data)
+    yield from _stream_assistant_message(profile, history or [], turn)
+
+
 def _refresh_starters(starters_data: list[dict]):
-    try:
-        starters = generate_conversation_starters(count=STARTER_COUNT)
-    except Exception as exc:
-        log_event("llm_conversation_starters", {"source": "error", "error": str(exc), "retry_count": 0})
-        return (
-            [],
-            0,
-            gr.update(value="Starter generation failed. Type your own first sentence.", interactive=False),
-            gr.update(visible=False),
-        )
+    starters = _starter_slice(starters_data)
+    log_event(
+        "conversation_starters_ui",
+        {"source": "local", "starters": [starter.model_dump() for starter in starters]},
+    )
     data = [starter.model_dump() for starter in starters]
-    return data, 0, _starter_button_update(starters, 0), gr.update(value="", visible=False)
+    return (
+        data,
+        0,
+        _starter_button_update(starters, 0),
+        gr.update(value="", visible=False),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(visible=True),
+    )
+
+
+def _starter_slice(starters_data: list[dict] | None) -> list[ConversationStarter]:
+    current = _starter_models(starters_data)
+    if not current:
+        return STARTER_LIBRARY[:STARTER_COUNT]
+    current_text = current[0].text if current else ""
+    try:
+        start_at = next(index for index, starter in enumerate(STARTER_LIBRARY) if starter.text == current_text) + STARTER_COUNT
+    except StopIteration:
+        start_at = STARTER_COUNT
+    return [STARTER_LIBRARY[(start_at + offset) % len(STARTER_LIBRARY)] for offset in range(STARTER_COUNT)]
 
 
 def _rotate_starter(starters_data: list[dict] | None, index: int | None):
@@ -690,7 +791,7 @@ def _render(
         gr.update(visible=False),
         gr.update(visible=True),
         history,
-        gr.update(value="", placeholder=chat_placeholder),
+        gr.update(value="", placeholder=chat_placeholder, visible=True, interactive=True),
         f"**{turn.progress_label}**",
         waiting_gallery,
         gr.update(visible=kind == ControlKind.CHOICE_CARDS),
