@@ -65,6 +65,12 @@ def build_demo() -> gr.Blocks:
                 start_submit = gr.Button("Begin", variant="primary", elem_classes=["ma-send"])
                 refresh_starters = gr.Button("Refresh examples", elem_classes=["ma-ghost"])
                 reset_from_start = gr.Button("Reset", elem_classes=["ma-ghost"])
+            start_waiting_gallery = gr.HTML(
+                render_waiting_gallery("The model is loading now. Meanwhile, you can take a look at the gallery."),
+                visible=True,
+                elem_classes=["ma-start-waiting"],
+                container=False,
+            )
             with gr.Row(elem_classes=["ma-starters"]):
                 starter_button = gr.Button(
                     STARTER_LOADING_LABEL,
@@ -79,50 +85,73 @@ def build_demo() -> gr.Blocks:
                 gr.Markdown("## Mythograph Atelier", elem_classes=["ma-brand"])
                 gr.Markdown(_format_runtime_status(), elem_classes=["ma-runtime"])
 
-            chatbot = gr.Chatbot(
-                value=[],
-                type="messages",
-                label="",
-                show_label=False,
-                height=430,
-                elem_id="ma-chatbot",
-                avatar_images=(None, None),
-                bubble_full_width=False,
-            )
-            progress = gr.Markdown(initial_turn.progress_label, elem_classes=["ma-progress"])
-            waiting_gallery = gr.HTML("", visible=False, elem_classes=["ma-waiting-shell"], container=False)
+            with gr.Group(elem_id="ma-chat-scroll"):
+                chatbot = gr.Chatbot(
+                    value=[],
+                    type="messages",
+                    label="",
+                    show_label=False,
+                    height=430,
+                    elem_id="ma-chatbot",
+                    avatar_images=(None, None),
+                    bubble_full_width=False,
+                )
+                progress = gr.Markdown(initial_turn.progress_label, elem_classes=["ma-progress"])
+                waiting_gallery = gr.HTML("", visible=False, elem_classes=["ma-waiting-shell"], container=False)
 
-            with gr.Group(elem_id="ma-control-tray"):
-                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as choice_group:
-                    choice_cards = gr.Radio(label="", choices=[], show_label=False, elem_classes=["ma-card-control"])
-                    choice_submit = gr.Button("Choose", variant="primary")
+                with gr.Group(elem_id="ma-control-tray"):
+                    with gr.Group(visible=False, elem_classes=["ma-control-group"]) as choice_group:
+                        choice_cards = gr.Radio(label="", choices=[], show_label=False, elem_classes=["ma-card-control"])
+                        choice_submit = gr.Button("Choose", variant="primary")
 
-                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as multi_group:
-                    multi_cards = gr.CheckboxGroup(label="", choices=[], show_label=False, elem_classes=["ma-card-control"])
-                    multi_submit = gr.Button("Choose", variant="primary")
+                    with gr.Group(visible=False, elem_classes=["ma-control-group"]) as multi_group:
+                        multi_cards = gr.CheckboxGroup(label="", choices=[], show_label=False, elem_classes=["ma-card-control"])
+                        multi_submit = gr.Button("Choose", variant="primary")
 
-                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as slider_group:
-                    gr.Markdown("### Studio dials")
-                    minimal_rich = gr.Slider(0, 100, value=35, step=1, label="minimal to rich")
-                    calm_intense = gr.Slider(0, 100, value=45, step=1, label="calm to intense")
-                    geometric_organic = gr.Slider(0, 100, value=45, step=1, label="geometric to organic")
-                    slider_submit = gr.Button("Save taste", variant="primary")
+                    with gr.Group(visible=False, elem_classes=["ma-control-group"]) as slider_group:
+                        gr.Markdown("### Studio dials")
+                        minimal_rich = gr.Slider(0, 100, value=35, step=1, label="minimal to rich")
+                        calm_intense = gr.Slider(0, 100, value=45, step=1, label="calm to intense")
+                        geometric_organic = gr.Slider(0, 100, value=45, step=1, label="geometric to organic")
+                        slider_submit = gr.Button("Save taste", variant="primary")
 
-                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as swatch_group:
-                    swatch_picker = gr.Radio(label="", choices=[], show_label=False, elem_classes=["ma-swatch-control"])
-                    swatch_submit = gr.Button("Set color weather", variant="primary")
+                    with gr.Group(visible=False, elem_classes=["ma-control-group"]) as swatch_group:
+                        swatch_picker = gr.Radio(label="", choices=[], show_label=False, elem_classes=["ma-swatch-control"])
+                        swatch_submit = gr.Button("Set color weather", variant="primary")
 
-                with gr.Group(visible=False, elem_classes=["ma-control-group"]) as refine_group:
-                    refine_text = gr.Textbox(
-                        label="",
-                        placeholder="Add one sentence, or name a feeling, symbol, memory, or contradiction.",
-                        lines=1,
-                        max_lines=1,
-                        show_label=False,
-                    )
-                    refine_submit = gr.Button("Add this", variant="primary")
+                    with gr.Group(visible=False, elem_classes=["ma-control-group"]) as refine_group:
+                        refine_text = gr.Textbox(
+                            label="",
+                            placeholder="Add one sentence, or name a feeling, symbol, memory, or contradiction.",
+                            lines=1,
+                            max_lines=1,
+                            show_label=False,
+                        )
+                        refine_submit = gr.Button("Add this", variant="primary")
 
-                ready_button = gr.Button("Create artwork", variant="primary", visible=False, elem_id="ma-create-button")
+                    ready_button = gr.Button("Create artwork", variant="primary", visible=False, elem_id="ma-create-button")
+
+                with gr.Group(visible=False, elem_id="ma-gallery") as gallery_group:
+                    with gr.Row(elem_classes=["ma-gallery-grid"]):
+                        with gr.Column(scale=5):
+                            image_output = gr.Image(
+                                label="",
+                                type="filepath",
+                                height=_gallery_image_height(),
+                                show_label=False,
+                            )
+                        with gr.Column(scale=4, elem_classes=["ma-result-copy"]):
+                            gallery_label = gr.Markdown("")
+                            symbol_map = gr.Markdown("", elem_classes=["ma-symbol-table"])
+                            regen = gr.Dropdown(
+                                choices=REGENERATION_OPTIONS,
+                                label="Regenerate",
+                                value=None,
+                                interactive=True,
+                                visible=False,
+                            )
+                            regen_button = gr.Button("Apply regeneration", visible=False)
+                            image_prompt = gr.Textbox(label="Image prompt", lines=4, visible=False)
 
             with gr.Row(elem_id="ma-input-dock"):
                 chat_text = gr.Textbox(
@@ -145,28 +174,6 @@ def build_demo() -> gr.Blocks:
                 )
                 trace_button = gr.Button("Download trace", visible=False)
                 trace_file = gr.File(label="Trace export", visible=False)
-
-            with gr.Group(visible=False, elem_id="ma-gallery") as gallery_group:
-                with gr.Row(elem_classes=["ma-gallery-grid"]):
-                    with gr.Column(scale=5):
-                        image_output = gr.Image(
-                            label="",
-                            type="filepath",
-                            height=_gallery_image_height(),
-                            show_label=False,
-                        )
-                    with gr.Column(scale=4, elem_classes=["ma-result-copy"]):
-                        gallery_label = gr.Markdown("")
-                        symbol_map = gr.Markdown("", elem_classes=["ma-symbol-table"])
-                        regen = gr.Dropdown(
-                            choices=REGENERATION_OPTIONS,
-                            label="Regenerate",
-                            value=None,
-                            interactive=True,
-                            visible=False,
-                        )
-                        regen_button = gr.Button("Apply regeneration", visible=False)
-                        image_prompt = gr.Textbox(label="Image prompt", lines=4, visible=False)
 
         flow_outputs = [
             profile_state,
@@ -244,13 +251,13 @@ def build_demo() -> gr.Blocks:
         refresh_starters.click(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button],
+            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
         )
 
         demo.load(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button],
+            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
             show_progress="hidden",
         )
         starter_timer.tick(
@@ -305,13 +312,13 @@ def build_demo() -> gr.Blocks:
         reset_button.click(fn=_reset, outputs=flow_outputs).then(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button],
+            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
             show_progress="hidden",
         )
         reset_from_start.click(fn=_reset, outputs=flow_outputs).then(
             fn=_refresh_starters,
             inputs=[starter_state],
-            outputs=[starter_state, starter_index_state, starter_button],
+            outputs=[starter_state, starter_index_state, starter_button, start_waiting_gallery],
             show_progress="hidden",
         )
 
@@ -389,9 +396,14 @@ def _refresh_starters(starters_data: list[dict]):
         starters = generate_conversation_starters(count=STARTER_COUNT)
     except Exception as exc:
         log_event("llm_conversation_starters", {"source": "error", "error": str(exc), "retry_count": 0})
-        return [], 0, gr.update(value="Starter generation failed. Type your own first sentence.", interactive=False)
+        return (
+            [],
+            0,
+            gr.update(value="Starter generation failed. Type your own first sentence.", interactive=False),
+            gr.update(visible=False),
+        )
     data = [starter.model_dump() for starter in starters]
-    return data, 0, _starter_button_update(starters, 0)
+    return data, 0, _starter_button_update(starters, 0), gr.update(value="", visible=False)
 
 
 def _rotate_starter(starters_data: list[dict] | None, index: int | None):
