@@ -51,7 +51,6 @@ def update_scores(profile: InterviewProfile) -> InterviewProfile:
     conversational_ready = (
         profile.turn_count >= 3
         and profile.scores.idea_anchor >= 0.55
-        and (bool(profile.contrasts) or bool(profile.styles) or bool(profile.visual_preferences))
         and (bool(profile.symbols) or len(profile.ideas + profile.free_notes) >= 3)
     )
     profile.scores.ready_to_generate = (

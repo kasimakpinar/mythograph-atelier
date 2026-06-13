@@ -38,6 +38,7 @@ def advance_conversation(
     user_message: str = "",
     control_response: ControlResponse | None = None,
     client: LLMClient | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> tuple[InterviewProfile, ConversationTurn]:
     profile = profile or new_profile()
     clean_message = (user_message or "").strip()
@@ -70,7 +71,7 @@ def advance_conversation(
         return profile, turn
 
     fallback_turn = choose_conversation_turn(profile)
-    turn = choose_conversation_turn_with_model(profile, fallback_turn, client)
+    turn = choose_conversation_turn_with_model(profile, fallback_turn, client, conversation_history)
     _remember_model_turn(profile, turn)
     log_event(
         "conversation_turn",
@@ -94,6 +95,7 @@ def choose_conversation_turn_with_model(
     profile: InterviewProfile,
     fallback_turn: ConversationTurn,
     client: LLMClient | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> ConversationTurn:
     if CONVERSATION_MODE != "model_assisted":
         return fallback_turn
@@ -111,7 +113,7 @@ def choose_conversation_turn_with_model(
                 "turn": fallback_turn.model_dump(),
             },
         )
-        return fallback_turn
+        return model_error_turn("The chat model is disabled, so I cannot choose the next question.", "llama.cpp chat disabled")
 
     system_prompt = (ROOT_DIR / "mythograph" / "prompts" / "conversation_director_system.txt").read_text(
         encoding="utf-8"
@@ -123,9 +125,15 @@ def choose_conversation_turn_with_model(
     payload = {
         "task": task,
         "atelier_state": build_atelier_state(profile),
+        "conversation_history": _conversation_history_for_model(conversation_history),
         "next_need": _next_need_for_model(profile, fallback_turn, task),
         "can_generate": can_generate,
         "conversation_budget": "Aim for a useful artwork brief in 3-5 meaningful exchanges. Keep chatting when the user's own words matter; use controls only when they help.",
+        "anti_repetition_instruction": (
+            "Read the full conversation_history before responding. Do not ask a question that has already been asked, "
+            "do not ask the user to choose among options they already chose, and if the user asked to create/generate the image, "
+            "return a ready_button when can_generate is true."
+        ),
         "controls_are_optional": True,
         "allowed_control_kinds": allowed_control_kinds,
         "control_guidance": {
@@ -146,7 +154,7 @@ def choose_conversation_turn_with_model(
     )
 
     if response.source == "mock":
-        return fallback_turn
+        return model_error_turn("The chat model returned a mock response instead of a real next turn.", "mock LLM response")
 
     last_error = response.error or ""
     last_content = response.content
@@ -168,7 +176,10 @@ def choose_conversation_turn_with_model(
             last_content = current_response.content or last_content
             if attempt >= max_attempts - 1:
                 elapsed_seconds = round(time.perf_counter() - started, 3)
-                error_turn = safe_conversation_fallback(profile, last_error, can_generate)
+                error_turn = model_error_turn(
+                    "The text model could not produce a valid next step after retries. Please try again.",
+                    last_error,
+                )
                 log_event(
                     "llm_conversation_turn",
                     {
@@ -198,6 +209,7 @@ def choose_conversation_turn_with_model(
                     "can_generate": can_generate,
                     "allowed_control_kinds": allowed_control_kinds,
                     "atelier_state": build_atelier_state(profile),
+                    "conversation_history": _conversation_history_for_model(conversation_history),
                     "quality_rules": _quality_rules_for_retry(profile),
                 },
                 max_tokens=max(LLM_CHAT_MAX_TOKENS, 180),
@@ -224,53 +236,13 @@ def choose_conversation_turn_with_model(
         )
         return candidate
 
-    return safe_conversation_fallback(profile, last_error)
+    return model_error_turn("The text model could not produce a valid next step after retries. Please try again.", last_error)
 
 
 def model_error_turn(message: str, detail: str = "") -> ConversationTurn:
     reason = "llama.cpp did not return valid schema JSON"
     if detail:
         reason = f"{reason}: {detail[:900]}"
-    return ConversationTurn(
-        assistant_message=message,
-        progress_label="Understanding your theme",
-        reason=reason,
-        is_ready=False,
-        controls=[],
-    )
-
-
-def safe_conversation_fallback(
-    profile: InterviewProfile,
-    detail: str = "",
-    can_generate: bool | None = None,
-) -> ConversationTurn:
-    if can_generate is None:
-        can_generate = _model_can_generate(profile)
-    if can_generate:
-        reason = "Fallback after invalid model output."
-        if detail:
-            reason = f"{reason} {detail[:600]}"
-        return _ready_turn(reason)
-
-    idea = _first_nonempty(profile.ideas + profile.free_notes)
-    if profile.turn_count <= 2:
-        message = (
-            "That helps. Give me one concrete place where this shows up in real life: "
-            "work, relationships, money, time, ambition, family, or something else."
-        )
-    elif not profile.contrasts:
-        message = (
-            "I think I understand the theme better now. What attitude should the painting hold toward it: "
-            "acceptance, resistance, trust, doubt, tenderness, or something else in your own words?"
-        )
-    else:
-        message = "I think I have enough of the meaning now. Add one last correction if I missed the heart of it."
-    if not idea:
-        message = "Tell me what this should be about in ordinary words. One sentence is enough."
-    reason = "Fallback after invalid model output."
-    if detail:
-        reason = f"{reason} {detail[:600]}"
     return ConversationTurn(
         assistant_message=message,
         progress_label="Understanding your theme",
@@ -423,6 +395,19 @@ def build_atelier_state(profile: InterviewProfile) -> dict:
         ],
         "recent_control_kinds": _recent_control_kinds(profile),
     }
+
+
+def _conversation_history_for_model(history: list[dict] | None) -> list[dict]:
+    cleaned: list[dict] = []
+    for item in history or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "")).strip().lower()
+        content = " ".join(str(item.get("content", "")).strip().split())
+        if role not in {"user", "assistant"} or not content:
+            continue
+        cleaned.append({"role": role, "content": content[:700]})
+    return cleaned[-18:]
 
 
 def _recent_control_kinds(profile: InterviewProfile) -> list[str]:
@@ -594,9 +579,8 @@ def _next_need_for_model(profile: InterviewProfile, turn: ConversationTurn, task
 
 def _model_can_generate(profile: InterviewProfile) -> bool:
     has_personal_meaning = profile.scores.idea_anchor >= 0.55
-    has_interpretive_signal = bool(profile.contrasts) or bool(profile.styles) or bool(profile.visual_preferences)
     has_personal_detail = bool(profile.symbols) or len(profile.ideas + profile.free_notes) >= 3
-    return profile.turn_count >= 3 and has_personal_meaning and has_interpretive_signal and has_personal_detail
+    return profile.turn_count >= 3 and has_personal_meaning and has_personal_detail
 
 
 def _missing_signals(profile: InterviewProfile) -> list[str]:
@@ -605,8 +589,6 @@ def _missing_signals(profile: InterviewProfile) -> list[str]:
         missing.append("personal meaning in the user's own words")
     if not profile.symbols and len(profile.ideas + profile.free_notes) < 3:
         missing.append("one personal memory, example, quote interpretation, contradiction, or metaphor")
-    if profile.scores.visual_taste < 0.18 and not profile.styles and not profile.visual_preferences:
-        missing.append("one interpretive stance such as acceptance, resistance, tenderness, courage, grief, control, or release")
     if profile.turn_count < 3:
         missing.append("another exchange before generation")
     return missing
